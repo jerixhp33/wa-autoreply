@@ -164,6 +164,131 @@ class GeminiService:
         logger.error(f"Gemini API failed after {MAX_RETRIES + 1} attempts: {last_error}")
         raise last_error
 
+    async def generate_multimodal_reply(
+        self,
+        system_prompt: str,
+        conversation_history: List[Dict],
+        user_message: str,
+        media_bytes: bytes,
+        mime_type: str,
+        caption: str = None,
+        max_length: int = 500,
+        language: str = "automatic",
+    ) -> Optional[str]:
+        """
+        Generate an AI reply for multimodal inputs (images, audio).
+        """
+        from google.genai import types
+
+        try:
+            client = self._get_client()
+        except ValueError as e:
+            logger.error(str(e))
+            return None
+
+        from datetime import datetime
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        now_ist = datetime.now(ist)
+        current_time = now_ist.strftime('%I:%M %p IST')
+        current_date = now_ist.strftime('%A, %B %d, %Y')
+
+        # Build full system instruction
+        full_system = system_prompt.strip()
+        full_system = full_system.replace('{current_time}', current_time)
+        full_system = full_system.replace('{current_date}', current_date)
+        full_system += f"\n\n## LIVE DATETIME\nCurrent IST Time: {current_time}\nCurrent Date: {current_date}\nAlways use this when user asks about time or date."
+        if language and language != "automatic":
+            full_system += f"\n\nAlways respond in: {language}."
+        if max_length and max_length > 0:
+            full_system += f"\n\nKeep your reply under {max_length} characters."
+
+        # Build content list from conversation history
+        contents: List[types.Content] = []
+
+        for msg in conversation_history:
+            gemini_role = "user" if msg["role"] == "incoming" else "model"
+            contents.append(
+                types.Content(
+                    role=gemini_role,
+                    parts=[types.Part(text=msg["content"])],
+                )
+            )
+
+        # Build parts for the final user message
+        final_parts = []
+        final_parts.append(types.Part.from_bytes(data=media_bytes, mime_type=mime_type))
+
+        if caption:
+            final_parts.append(types.Part(text=caption))
+
+        if user_message and user_message != caption:
+            final_parts.append(types.Part(text=user_message))
+
+        if not caption and not user_message:
+            if mime_type.startswith('audio/'):
+                final_parts.append(types.Part(text="Please transcribe and respond to this voice message."))
+            else:
+                final_parts.append(types.Part(text="What is this?"))
+
+        contents.append(
+            types.Content(
+                role="user",
+                parts=final_parts,
+            )
+        )
+
+        config = types.GenerateContentConfig(
+            system_instruction=full_system,
+            max_output_tokens=min(1024, max_length * 2 if max_length else 1024),
+            temperature=0.7,
+        )
+
+        # Retry loop with exponential backoff
+        last_error = None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                # Use async client
+                response = await client.aio.models.generate_content(
+                    model=self.model,
+                    contents=contents,
+                    config=config,
+                )
+
+                if not response or not response.text:
+                    logger.warning("Gemini returned empty response")
+                    return None
+
+                reply = response.text.strip()
+
+                # Enforce character limit
+                if max_length and len(reply) > max_length:
+                    # Try to cut at word boundary
+                    truncated = reply[:max_length]
+                    last_space = truncated.rfind(" ")
+                    if last_space > max_length * 0.8:
+                        truncated = truncated[:last_space]
+                    reply = truncated + "…"
+
+                return reply
+
+            except Exception as e:
+                last_error = e
+                if attempt < MAX_RETRIES and _is_retryable_error(e):
+                    delay = BASE_DELAY_SECONDS * (2 ** attempt)
+                    logger.warning(
+                        f"Gemini API transient error (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
+                        f"retrying in {delay:.1f}s: {type(e).__name__}: {e}"
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Gemini API error: {type(e).__name__}: {e}")
+                    raise
+
+        # Should not reach here, but just in case
+        logger.error(f"Gemini API failed after {MAX_RETRIES + 1} attempts: {last_error}")
+        raise last_error
+
 
 # Singleton
 gemini_service = GeminiService()

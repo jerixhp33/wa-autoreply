@@ -43,6 +43,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import os
+from fastapi.staticfiles import StaticFiles
+from app.config import settings as app_settings
+
+# Mount media directory for serving downloaded media files
+os.makedirs(app_settings.media_dir, exist_ok=True)
+app.mount("/media", StaticFiles(directory=app_settings.media_dir), name="media")
+
 # Import and include routers
 from app.api.auth import router as auth_router
 from app.api.whatsapp import router as whatsapp_router

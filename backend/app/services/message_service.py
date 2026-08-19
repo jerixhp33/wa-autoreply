@@ -83,6 +83,11 @@ def save_message(
     ai_generated: bool = False,
     status: str = MessageStatus.sent,
     whatsapp_message_id: Optional[str] = None,
+    message_type: str = "text",
+    media_path: Optional[str] = None,
+    media_mime_type: Optional[str] = None,
+    media_caption: Optional[str] = None,
+    transcription: Optional[str] = None,
 ) -> Message:
     """Save a message to the database."""
     msg = Message(
@@ -92,7 +97,11 @@ def save_message(
         ai_generated=ai_generated,
         status=status,
         whatsapp_message_id=whatsapp_message_id,
-        message_type="text",
+        message_type=message_type,
+        media_path=media_path,
+        media_mime_type=media_mime_type,
+        media_caption=media_caption,
+        transcription=transcription,
     )
     db.add(msg)
 
@@ -126,7 +135,16 @@ def get_conversation_history(
     history = []
     for msg in messages:
         role = "incoming" if msg.direction == MessageDirection.incoming else "outgoing"
-        history.append({"role": role, "content": msg.content})
+        # Include media context in conversation history
+        if msg.message_type == "image":
+            text = msg.media_caption or msg.content or "[User sent an image]"
+            if msg.transcription:
+                text = f"[Image description: {msg.transcription}] {text}"
+        elif msg.message_type == "audio":
+            text = msg.transcription or msg.content or "[User sent a voice note]"
+        else:
+            text = msg.content or ""
+        history.append({"role": role, "content": text})
 
     return history
 
@@ -138,6 +156,10 @@ async def process_incoming_message(
     is_group: bool,
     message_id: Optional[str] = None,
     ws_callback=None,
+    media_path: Optional[str] = None,
+    media_type: str = "text",
+    mime_type: Optional[str] = None,
+    caption: Optional[str] = None,
 ) -> Optional[str]:
     """
     Full message processing pipeline:
@@ -191,6 +213,10 @@ async def process_incoming_message(
             ai_generated=False,
             status=MessageStatus.delivered,
             whatsapp_message_id=message_id,
+            message_type=media_type,
+            media_path=media_path,
+            media_mime_type=mime_type,
+            media_caption=caption,
         )
 
         # Emit WebSocket event for incoming message
@@ -240,13 +266,44 @@ async def process_incoming_message(
 
         # Generate AI reply
         try:
-            reply = await gemini_service.generate_reply(
-                system_prompt=bot_settings.system_prompt,
-                conversation_history=history,
-                user_message=content,
-                max_length=bot_settings.max_reply_length,
-                language=bot_settings.language,
-            )
+            if media_path and media_type in ("image", "audio"):
+                # Read media bytes for multimodal AI processing
+                import aiofiles
+                try:
+                    async with aiofiles.open(media_path, 'rb') as f:
+                        media_bytes = await f.read()
+                except Exception as e:
+                    logger.error(f"Failed to read media file {media_path}: {e}")
+                    media_bytes = None
+
+                if media_bytes and mime_type:
+                    reply = await gemini_service.generate_multimodal_reply(
+                        system_prompt=bot_settings.system_prompt,
+                        conversation_history=history,
+                        user_message=content or "",
+                        media_bytes=media_bytes,
+                        mime_type=mime_type.split(';')[0].strip(),
+                        caption=caption,
+                        max_length=bot_settings.max_reply_length,
+                        language=bot_settings.language,
+                    )
+                else:
+                    # Fallback to text reply if media couldn't be read
+                    reply = await gemini_service.generate_reply(
+                        system_prompt=bot_settings.system_prompt,
+                        conversation_history=history,
+                        user_message=content or "[Media message]",
+                        max_length=bot_settings.max_reply_length,
+                        language=bot_settings.language,
+                    )
+            else:
+                reply = await gemini_service.generate_reply(
+                    system_prompt=bot_settings.system_prompt,
+                    conversation_history=history,
+                    user_message=content,
+                    max_length=bot_settings.max_reply_length,
+                    language=bot_settings.language,
+                )
         except Exception as e:
             logger.error(f"Gemini error: {e}")
             if ws_callback:

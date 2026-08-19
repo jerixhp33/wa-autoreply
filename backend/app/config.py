@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     backend_port: int = 8000
     sessions_dir: str = "/app/sessions"
+    media_dir: str = "/app/media"
 
     class Config:
         env_file = ".env"

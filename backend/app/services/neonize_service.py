@@ -135,19 +135,67 @@ class WhatsAppSession:
                     if info.MessageSource.IsFromMe:
                         return
 
-                    # Extract text content
+                    is_group = info.MessageSource.IsGroup
+                    message_id = info.ID
+
+                    # Extract message content (text, image, or audio)
                     content = None
+                    media_path = None
+                    media_type = "text"
+                    mime_type = None
+                    caption = None
                     msg = event.Message
+
                     if msg.conversation:
                         content = msg.conversation
                     elif msg.extendedTextMessage and msg.extendedTextMessage.text:
                         content = msg.extendedTextMessage.text
+                    elif msg.imageMessage:
+                        media_type = "image"
+                        mime_type = msg.imageMessage.mimetype or "image/jpeg"
+                        caption = msg.imageMessage.caption or None
+                        content = caption or "[Image]"
+                        # Download image
+                        try:
+                            media_bytes = c.download_any(msg)
+                            if media_bytes:
+                                import os
+                                from app.config import settings
+                                ext = mime_type.split('/')[-1].split(';')[0]
+                                media_dir = os.path.join(settings.media_dir, self.account_id)
+                                os.makedirs(media_dir, exist_ok=True)
+                                filename = f"{message_id or 'img'}.{ext}"
+                                media_path = os.path.join(media_dir, filename)
+                                with open(media_path, 'wb') as f:
+                                    f.write(media_bytes)
+                                logger.info(f"Downloaded image: {media_path} ({len(media_bytes)} bytes)")
+                        except Exception as e:
+                            logger.error(f"Failed to download image: {e}")
+                    elif msg.audioMessage:
+                        media_type = "audio"
+                        mime_type = msg.audioMessage.mimetype or "audio/ogg; codecs=opus"
+                        content = "[Voice Note]"
+                        # Download audio
+                        try:
+                            media_bytes = c.download_any(msg)
+                            if media_bytes:
+                                import os
+                                from app.config import settings
+                                ext = "ogg"
+                                media_dir = os.path.join(settings.media_dir, self.account_id)
+                                os.makedirs(media_dir, exist_ok=True)
+                                filename = f"{message_id or 'audio'}.{ext}"
+                                media_path = os.path.join(media_dir, filename)
+                                with open(media_path, 'wb') as f:
+                                    f.write(media_bytes)
+                                logger.info(f"Downloaded audio: {media_path} ({len(media_bytes)} bytes)")
+                        except Exception as e:
+                            logger.error(f"Failed to download audio: {e}")
+                    else:
+                        return  # Skip unsupported message types
 
-                    if not content:
-                        return  # Skip non-text messages
-
-                    is_group = info.MessageSource.IsGroup
-                    message_id = info.ID
+                    if not content and not media_path:
+                        return  # Nothing to process
 
                     sender_jid = info.MessageSource.Sender
                     chat_jid = info.MessageSource.Chat
@@ -189,6 +237,10 @@ class WhatsAppSession:
                         content=content,
                         is_group=is_group,
                         message_id=message_id,
+                        media_path=media_path,
+                        media_type=media_type,
+                        mime_type=mime_type,
+                        caption=caption,
                     ))
                 except Exception as e:
                     logger.error(f"Error processing message event: {e}", exc_info=True)

@@ -18,7 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create sessions directory
-RUN mkdir -p /app/sessions
+RUN mkdir -p /app/sessions /app/media
 
 EXPOSE 8000
 
