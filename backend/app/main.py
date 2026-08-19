@@ -43,13 +43,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount media directory for serving downloaded media files
 import os
 from fastapi.staticfiles import StaticFiles
-from app.config import settings as app_settings
-
-# Mount media directory for serving downloaded media files
-os.makedirs(app_settings.media_dir, exist_ok=True)
-app.mount("/media", StaticFiles(directory=app_settings.media_dir), name="media")
+_media_dir = settings.media_dir
+os.makedirs(_media_dir, exist_ok=True)
+try:
+    app.mount("/media", StaticFiles(directory=_media_dir), name="media")
+except Exception:
+    pass  # Media dir will be created at runtime
 
 # Import and include routers
 from app.api.auth import router as auth_router
