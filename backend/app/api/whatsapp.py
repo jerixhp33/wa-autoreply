@@ -115,6 +115,11 @@ async def handle_message(
     content: str,
     is_group: bool,
     message_id: str = None,
+    media_path: str = None,
+    media_type: str = "text",
+    mime_type: str = None,
+    caption: str = None,
+    **kwargs,
 ):
     """Handle incoming WhatsApp message."""
     global _processed_message_ids
@@ -139,6 +144,10 @@ async def handle_message(
         is_group=is_group,
         message_id=message_id,
         ws_callback=ws_callback,
+        media_path=media_path,
+        media_type=media_type,
+        mime_type=mime_type,
+        caption=caption,
     )
 
     if reply:
