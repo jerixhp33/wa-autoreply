@@ -75,8 +75,18 @@ class GeminiService:
             logger.error(str(e))
             return None
 
+        from datetime import datetime
+        import pytz
+        ist = pytz.timezone('Asia/Kolkata')
+        now_ist = datetime.now(ist)
+        current_time = now_ist.strftime('%I:%M %p IST')
+        current_date = now_ist.strftime('%A, %B %d, %Y')
+
         # Build full system instruction
         full_system = system_prompt.strip()
+        full_system = full_system.replace('{current_time}', current_time)
+        full_system = full_system.replace('{current_date}', current_date)
+        full_system += f"\n\n## LIVE DATETIME\nCurrent IST Time: {current_time}\nCurrent Date: {current_date}\nAlways use this when user asks about time or date."
         if language and language != "automatic":
             full_system += f"\n\nAlways respond in: {language}."
         if max_length and max_length > 0:
