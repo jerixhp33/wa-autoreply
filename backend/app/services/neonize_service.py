@@ -1,0 +1,353 @@
+"""
+Neonize WhatsApp Service
+
+Manages WhatsApp sessions using Neonize 0.4.x.
+Each account gets its own NewClient with persistent session storage.
+
+Key API notes (v0.4.x):
+  - NewClient(name, jid=None) — name is used as the session identifier/path
+  - client.qr(callback) — sets QR callback(client, qr_bytes)
+  - client.event(EventClass)(callback) — registers event handlers
+  - client.connect() — SYNCHRONOUS blocking call, runs on a thread
+  - client.send_message(jid, Message | str) — send text
+"""
+import asyncio
+import logging
+import os
+import io
+import base64
+import threading
+from typing import Dict, Optional, Callable, Any
+
+logger = logging.getLogger(__name__)
+
+
+class WhatsAppSession:
+    """Represents a single WhatsApp account session."""
+
+    def __init__(
+        self,
+        account_id: str,
+        session_name: str,
+        on_qr: Callable,
+        on_connected: Callable,
+        on_disconnected: Callable,
+        on_message: Callable,
+        loop: asyncio.AbstractEventLoop,
+    ):
+        self.account_id = account_id
+        self.session_name = session_name
+        self.on_qr = on_qr
+        self.on_connected = on_connected
+        self.on_disconnected = on_disconnected
+        self.on_message = on_message
+        self.loop = loop
+        self.client = None
+        self.connected = False
+        self.phone_number: Optional[str] = None
+        self._thread: Optional[threading.Thread] = None
+        self._stopped = False
+
+    def _run_sync(self):
+        """Called in a background thread to run the Neonize session."""
+        try:
+            from neonize.client import NewClient
+            from neonize.proto.Neonize_pb2 import (
+                Message as MessageEv,
+                Connected as ConnectedEv,
+                Disconnected as DisconnectedEv,
+                LoggedOut as LoggedOutEv,
+            )
+
+            logger.info(f"Starting Neonize session: {self.session_name}")
+            client = NewClient(self.session_name)
+            self.client = client
+
+            # ── QR callback ───────────────────────────────────────────────
+            def _safe_schedule(coro):
+                """Schedule a coroutine on the event loop from a thread."""
+                try:
+                    if not self.loop.is_closed():
+                        asyncio.run_coroutine_threadsafe(coro, self.loop)
+                    else:
+                        logger.debug("Event loop closed, skipping callback")
+                except Exception as e:
+                    logger.debug(f"Could not schedule callback: {e}")
+
+            @client.qr
+            def on_qr_bytes(c, qr_bytes: bytes):
+                """Called when QR code data is available."""
+                try:
+                    import qrcode
+                    qr_str = qr_bytes.decode("utf-8") if isinstance(qr_bytes, bytes) else qr_bytes
+                    qr = qrcode.QRCode(
+                        version=1,
+                        error_correction=qrcode.constants.ERROR_CORRECT_L,
+                        box_size=10,
+                        border=4,
+                    )
+                    qr.add_data(qr_str)
+                    qr.make(fit=True)
+                    img = qr.make_image(fill_color="black", back_color="white")
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    buf.seek(0)
+                    qr_data_uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+                except Exception as e:
+                    logger.warning(f"QR image generation failed: {e}, using raw bytes")
+                    qr_data_uri = qr_bytes.decode("utf-8") if isinstance(qr_bytes, bytes) else str(qr_bytes)
+
+                _safe_schedule(self.on_qr(self.account_id, qr_data_uri))
+
+            # ── Connected event ───────────────────────────────────────────
+            @client.event(ConnectedEv)
+            def on_connected_ev(c, event: ConnectedEv):
+                self.connected = True
+                phone = None
+                try:
+                    if c.me:
+                        phone = str(c.me.ID.User) if hasattr(c.me, 'ID') else None
+                except Exception:
+                    pass
+                self.phone_number = phone
+                _safe_schedule(self.on_connected(self.account_id, phone))
+
+            # ── Disconnected event ────────────────────────────────────────
+            @client.event(DisconnectedEv)
+            def on_disconnected_ev(c, event: DisconnectedEv):
+                self.connected = False
+                _safe_schedule(self.on_disconnected(self.account_id))
+
+            # ── LoggedOut event ───────────────────────────────────────────
+            @client.event(LoggedOutEv)
+            def on_logged_out(c, event: LoggedOutEv):
+                self.connected = False
+                logger.warning(f"Account {self.account_id} was logged out")
+                _safe_schedule(self.on_disconnected(self.account_id))
+
+            # ── Message event ─────────────────────────────────────────────
+            @client.event(MessageEv)
+            def on_message_ev(c, event: MessageEv):
+                try:
+                    info = event.Info
+
+                    # Skip outgoing messages
+                    if info.MessageSource.IsFromMe:
+                        return
+
+                    # Extract text content
+                    content = None
+                    msg = event.Message
+                    if msg.conversation:
+                        content = msg.conversation
+                    elif msg.extendedTextMessage and msg.extendedTextMessage.text:
+                        content = msg.extendedTextMessage.text
+
+                    if not content:
+                        return  # Skip non-text messages
+
+                    is_group = info.MessageSource.IsGroup
+                    message_id = info.ID
+
+                    sender_jid = info.MessageSource.Sender
+                    chat_jid = info.MessageSource.Chat
+
+                    logger.info(
+                        f"Message received - "
+                        f"Sender: {sender_jid.User}@{sender_jid.Server}, "
+                        f"Chat: {chat_jid.User}@{chat_jid.Server}, "
+                        f"IsGroup: {is_group}"
+                    )
+
+                    # Resolve LID to real phone number
+                    # WhatsApp LIDs use "lid" as the Server field
+                    phone_number = None
+                    raw_jid = chat_jid if not is_group else sender_jid
+
+                    if raw_jid.Server == "lid":
+                        # This is a LID — try to resolve to real phone number
+                        try:
+                            resolved = c.get_pn_from_lid(raw_jid)
+                            if resolved and resolved.User:
+                                phone_number = str(resolved.User)
+                                logger.info(
+                                    f"Resolved LID {raw_jid.User} -> phone {phone_number}"
+                                )
+                        except Exception as e:
+                            logger.warning(
+                                f"Could not resolve LID {raw_jid.User}: {e}"
+                            )
+
+                    # Fallback: use the raw User field
+                    if not phone_number:
+                        phone_number = str(raw_jid.User)
+                        logger.info(f"Using raw JID user as phone: {phone_number}")
+
+                    _safe_schedule(self.on_message(
+                        account_id=self.account_id,
+                        sender=phone_number,
+                        content=content,
+                        is_group=is_group,
+                        message_id=message_id,
+                    ))
+                except Exception as e:
+                    logger.error(f"Error processing message event: {e}", exc_info=True)
+
+            # ── Connect (blocking) ────────────────────────────────────────
+            logger.info(f"Calling client.connect() for {self.account_id}")
+            client.connect()
+
+        except Exception as e:
+            if not self._stopped:
+                logger.error(f"Session error for {self.account_id}: {e}", exc_info=True)
+            self.connected = False
+            try:
+                if not self.loop.is_closed():
+                    asyncio.run_coroutine_threadsafe(
+                        self.on_disconnected(self.account_id),
+                        self.loop
+                    )
+            except Exception as cb_err:
+                logger.debug(f"Disconnect callback error (loop may be closed): {cb_err}")
+
+    def start(self):
+        """Start the session in a background daemon thread."""
+        self._stopped = False
+        self._thread = threading.Thread(
+            target=self._run_sync,
+            name=f"wa-session-{self.account_id}",
+            daemon=True,
+        )
+        self._thread.start()
+        logger.info(f"Session thread started for {self.account_id}")
+
+    def send_message(self, phone: str, text: str) -> bool:
+        """Send a text message synchronously (callable from any thread)."""
+        if not self.client or not self.connected:
+            raise RuntimeError(f"WhatsApp not connected for account {self.account_id}")
+
+        try:
+            from neonize.client import JID, build_jid
+
+            # Build JID from phone number
+            jid = build_jid(phone, "s.whatsapp.net")
+
+            # Try to resolve phone number to LID for sending
+            # WhatsApp may require LID JIDs for delivery
+            try:
+                lid_jid = self.client.get_lid_from_pn(jid)
+                if lid_jid and lid_jid.User:
+                    logger.info(f"Resolved phone {phone} -> LID {lid_jid.User} for sending")
+                    jid = lid_jid
+            except Exception:
+                pass  # Use phone JID if LID resolution fails
+
+            self.client.send_message(jid, text)
+            logger.info(f"Message sent to {phone}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send message to {phone}: {e}")
+            raise
+
+    def stop(self):
+        """Stop the session."""
+        self._stopped = True
+        self.connected = False
+        if self.client:
+            try:
+                from neonize.client import stop_event
+                stop_event.set()
+            except Exception as e:
+                logger.warning(f"Could not set stop_event: {e}")
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5)
+
+
+class NeonizeManager:
+    """Manages multiple WhatsApp sessions."""
+
+    def __init__(self):
+        self.sessions: Dict[str, WhatsAppSession] = {}
+        self._callbacks: Dict[str, Dict[str, Callable]] = {}
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        if self._loop is None:
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._loop = asyncio.new_event_loop()
+        return self._loop
+
+    def register_callbacks(
+        self,
+        account_id: str,
+        on_qr: Callable,
+        on_connected: Callable,
+        on_disconnected: Callable,
+        on_message: Callable,
+    ):
+        """Register event callbacks for an account."""
+        self._callbacks[account_id] = {
+            "on_qr": on_qr,
+            "on_connected": on_connected,
+            "on_disconnected": on_disconnected,
+            "on_message": on_message,
+        }
+
+    async def start_session(self, account_id: str, session_name: str) -> WhatsAppSession:
+        """Start a WhatsApp session for an account."""
+        # Stop existing session if any
+        if account_id in self.sessions:
+            existing = self.sessions[account_id]
+            if existing.connected:
+                return existing
+            existing.stop()
+            del self.sessions[account_id]
+
+        callbacks = self._callbacks.get(account_id, {})
+        loop = asyncio.get_running_loop()
+
+        session = WhatsAppSession(
+            account_id=account_id,
+            session_name=session_name,
+            on_qr=callbacks.get("on_qr", self._noop),
+            on_connected=callbacks.get("on_connected", self._noop),
+            on_disconnected=callbacks.get("on_disconnected", self._noop),
+            on_message=callbacks.get("on_message", self._noop),
+            loop=loop,
+        )
+
+        self.sessions[account_id] = session
+        session.start()
+        return session
+
+    async def stop_session(self, account_id: str):
+        """Stop a WhatsApp session."""
+        if account_id in self.sessions:
+            session = self.sessions.pop(account_id)
+            await asyncio.get_event_loop().run_in_executor(None, session.stop)
+
+    async def send_message(self, account_id: str, phone: str, text: str) -> bool:
+        """Send a message from a specific account (async wrapper)."""
+        session = self.sessions.get(account_id)
+        if not session:
+            raise RuntimeError(f"No active session for account {account_id}")
+        # Run blocking send in executor
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, session.send_message, phone, text)
+
+    def get_session(self, account_id: str) -> Optional[WhatsAppSession]:
+        return self.sessions.get(account_id)
+
+    def is_connected(self, account_id: str) -> bool:
+        session = self.sessions.get(account_id)
+        return session is not None and session.connected
+
+    @staticmethod
+    async def _noop(*args, **kwargs):
+        pass
+
+
+# Global manager instance
+neonize_manager = NeonizeManager()
