@@ -146,11 +146,24 @@ class WhatsAppSession:
                     caption = None
                     msg = event.Message
 
+                    # Check protobuf HasField for accurate media type detection
+                    has_image = False
+                    has_audio = False
+                    try:
+                        has_image = msg.HasField("imageMessage")
+                    except Exception:
+                        has_image = bool(msg.imageMessage and (getattr(msg.imageMessage, "url", None) or getattr(msg.imageMessage, "directPath", None)))
+
+                    try:
+                        has_audio = msg.HasField("audioMessage")
+                    except Exception:
+                        has_audio = bool(msg.audioMessage and (getattr(msg.audioMessage, "url", None) or getattr(msg.audioMessage, "directPath", None)))
+
                     if msg.conversation:
                         content = msg.conversation
                     elif msg.extendedTextMessage and msg.extendedTextMessage.text:
                         content = msg.extendedTextMessage.text
-                    elif msg.imageMessage:
+                    elif has_image:
                         media_type = "image"
                         mime_type = msg.imageMessage.mimetype or "image/jpeg"
                         caption = msg.imageMessage.caption or None
@@ -171,7 +184,7 @@ class WhatsAppSession:
                                 logger.info(f"Downloaded image: {media_path} ({len(media_bytes)} bytes)")
                         except Exception as e:
                             logger.error(f"Failed to download image: {e}")
-                    elif msg.audioMessage:
+                    elif has_audio:
                         media_type = "audio"
                         mime_type = msg.audioMessage.mimetype or "audio/ogg; codecs=opus"
                         content = "[Voice Note]"

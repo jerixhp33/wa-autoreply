@@ -222,14 +222,13 @@ class GeminiService:
         if caption:
             final_parts.append(types.Part(text=caption))
 
-        if user_message and user_message != caption:
+        if user_message and user_message not in (caption, "[Voice Note]", "[Image]"):
             final_parts.append(types.Part(text=user_message))
 
-        if not caption and not user_message:
-            if mime_type.startswith('audio/'):
-                final_parts.append(types.Part(text="Please transcribe and respond to this voice message."))
-            else:
-                final_parts.append(types.Part(text="What is this?"))
+        if mime_type.startswith('audio/'):
+            final_parts.append(types.Part(text="Listen to this voice note, understand what the user is saying, and reply to them naturally in the same language."))
+        elif not caption and (not user_message or user_message == "[Image]"):
+            final_parts.append(types.Part(text="What is this photo? Describe it and reply naturally."))
 
         contents.append(
             types.Content(
