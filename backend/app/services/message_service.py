@@ -431,18 +431,14 @@ async def process_incoming_message(
                     {"conversation_id": conv.id, "error": str(e)},
                     account.user_id
                 )
-            # If it's an audio message, provide a safe friendly fallback instead of total silence
+            # Safe friendly fallback so the customer is never met with dead silence
             if media_type == "audio":
                 reply = "I received your voice note, but couldn't process it right now. Please feel free to text your message!"
             else:
-                return None
-
-        if not reply and media_type == "audio":
-            reply = "I'm sorry, I couldn't hear or understand the voice note clearly. Could you please send it again or type your message?"
+                reply = "வணக்கம்! உங்க மெசேஜ் வந்தது. சொல்லுங்க, நான் உங்களுக்கு எப்படி உதவ முடியும்? (Hi! Got your message. How can I help you?)"
 
         if not reply:
-            logger.warning("Gemini returned empty reply")
-            return None
+            reply = "வணக்கம்! சொல்லுங்க, நான் உங்களுக்கு எப்படி உதவ முடியும்? (How can I help you?)"
 
         # Parse dual-track reply: display_text (for screen) vs speech_text (for audio synthesis)
         display_text, speech_text = parse_dual_track_reply(reply)

@@ -221,6 +221,7 @@ class WhatsAppSession:
                     # Check protobuf HasField for accurate media type detection
                     has_image = False
                     has_audio = False
+                    has_sticker = False
                     try:
                         has_image = msg.HasField("imageMessage")
                     except Exception:
@@ -230,6 +231,11 @@ class WhatsAppSession:
                         has_audio = msg.HasField("audioMessage")
                     except Exception:
                         has_audio = bool(getattr(msg, "audioMessage", None) and (getattr(msg.audioMessage, "url", None) or getattr(msg.audioMessage, "directPath", None)))
+
+                    try:
+                        has_sticker = msg.HasField("stickerMessage")
+                    except Exception:
+                        has_sticker = bool(getattr(msg, "stickerMessage", None))
 
                     if msg.conversation:
                         content = msg.conversation
@@ -296,6 +302,34 @@ class WhatsAppSession:
                                 logger.info(f"Downloaded audio: {media_path} ({len(media_bytes)} bytes)")
                         except Exception as e:
                             logger.error(f"Failed to download audio: {e}")
+                    elif has_sticker:
+                        media_type = "image"
+                        mime_type = "image/webp"
+                        content = "[Sticker]"
+                        try:
+                            media_bytes = None
+                            try:
+                                media_bytes = c.download_any(msg)
+                            except Exception:
+                                pass
+                            if not media_bytes and hasattr(msg, "stickerMessage"):
+                                try:
+                                    media_bytes = c.download_any(msg.stickerMessage)
+                                except Exception:
+                                    pass
+
+                            if media_bytes:
+                                import os
+                                from app.config import settings
+                                media_dir = os.path.join(settings.media_dir, self.account_id)
+                                os.makedirs(media_dir, exist_ok=True)
+                                filename = f"{message_id or 'sticker'}.webp"
+                                media_path = os.path.join(media_dir, filename)
+                                with open(media_path, 'wb') as f:
+                                    f.write(media_bytes)
+                                logger.info(f"Downloaded sticker: {media_path} ({len(media_bytes)} bytes)")
+                        except Exception as e:
+                            logger.error(f"Failed to download sticker: {e}")
                     else:
                         return  # Skip unsupported message types
 

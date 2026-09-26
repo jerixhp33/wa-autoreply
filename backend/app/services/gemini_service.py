@@ -193,7 +193,7 @@ class GeminiService:
         tools = None
         if enable_web_search:
             try:
-                tools = [types.Tool(google_search=types.GoogleSearch())]
+                tools = [{"google_search": {}}]
             except Exception as tool_err:
                 logger.debug(f"Google search tool init note: {tool_err}")
 
@@ -204,49 +204,77 @@ class GeminiService:
             temperature=0.7,
         )
 
-        # Retry loop with exponential backoff
-        last_error = None
-        for attempt in range(MAX_RETRIES + 1):
+        # Attempt with tools first if enabled, but fall back immediately if tools cause rejection
+        if tools:
             try:
-                # Use async client
                 response = await client.aio.models.generate_content(
                     model=self.model,
                     contents=contents,
                     config=config,
                 )
+                if response and response.text:
+                    reply = response.text.strip()
+                    if max_length and len(reply) > max_length:
+                        truncated = reply[:max_length]
+                        last_space = truncated.rfind(" ")
+                        if last_space > max_length * 0.8:
+                            truncated = truncated[:last_space]
+                        reply = truncated + "…"
+                    return reply
+            except Exception as tool_err:
+                logger.warning(
+                    f"Gemini call with tools failed ({type(tool_err).__name__}: {tool_err}); "
+                    "falling back immediately to standard generation without tools."
+                )
+                config.tools = None
 
-                if not response or not response.text:
-                    logger.warning("Gemini returned empty response")
-                    return None
+        # Standard generation without tools (with retry loop and model fallback)
+        last_error = None
+        candidate_models = [self.model]
+        if "1.5" in self.model:
+            candidate_models.append("gemini-2.0-flash")
+        elif "2.0" in self.model:
+            candidate_models.append("gemini-1.5-flash")
 
-                reply = response.text.strip()
-
-                # Enforce character limit
-                if max_length and len(reply) > max_length:
-                    # Try to cut at word boundary
-                    truncated = reply[:max_length]
-                    last_space = truncated.rfind(" ")
-                    if last_space > max_length * 0.8:
-                        truncated = truncated[:last_space]
-                    reply = truncated + "…"
-
-                return reply
-
-            except Exception as e:
-                last_error = e
-                if attempt < MAX_RETRIES and _is_retryable_error(e):
-                    delay = BASE_DELAY_SECONDS * (2 ** attempt)
-                    logger.warning(
-                        f"Gemini API transient error (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
-                        f"retrying in {delay:.1f}s: {type(e).__name__}: {e}"
+        for model_name in candidate_models:
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    response = await client.aio.models.generate_content(
+                        model=model_name,
+                        contents=contents,
+                        config=config,
                     )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"Gemini API error: {type(e).__name__}: {e}")
-                    raise
 
-        # Should not reach here, but just in case
-        logger.error(f"Gemini API failed after {MAX_RETRIES + 1} attempts: {last_error}")
+                    if not response or not response.text:
+                        logger.warning(f"Gemini returned empty response from {model_name}")
+                        continue
+
+                    reply = response.text.strip()
+
+                    # Enforce character limit
+                    if max_length and len(reply) > max_length:
+                        truncated = reply[:max_length]
+                        last_space = truncated.rfind(" ")
+                        if last_space > max_length * 0.8:
+                            truncated = truncated[:last_space]
+                        reply = truncated + "…"
+
+                    return reply
+
+                except Exception as e:
+                    last_error = e
+                    if attempt < MAX_RETRIES and _is_retryable_error(e):
+                        delay = BASE_DELAY_SECONDS * (2 ** attempt)
+                        logger.warning(
+                            f"Gemini API transient error on {model_name} (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
+                            f"retrying in {delay:.1f}s: {type(e).__name__}: {e}"
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.warning(f"Gemini model {model_name} attempt error: {type(e).__name__}: {e}")
+                        break
+
+        logger.error(f"Gemini API failed across candidate models: {last_error}")
         raise last_error
 
     async def generate_multimodal_reply(
@@ -368,7 +396,7 @@ class GeminiService:
         tools = None
         if enable_web_search:
             try:
-                tools = [types.Tool(google_search=types.GoogleSearch())]
+                tools = [{"google_search": {}}]
             except Exception as tool_err:
                 logger.debug(f"Google search tool init note: {tool_err}")
 
@@ -379,49 +407,77 @@ class GeminiService:
             temperature=0.7,
         )
 
-        # Retry loop with exponential backoff
-        last_error = None
-        for attempt in range(MAX_RETRIES + 1):
+        # Attempt with tools first if enabled, but fall back immediately if tools cause rejection
+        if tools:
             try:
-                # Use async client
                 response = await client.aio.models.generate_content(
                     model=self.model,
                     contents=contents,
                     config=config,
                 )
+                if response and response.text:
+                    reply = response.text.strip()
+                    if max_length and len(reply) > max_length:
+                        truncated = reply[:max_length]
+                        last_space = truncated.rfind(" ")
+                        if last_space > max_length * 0.8:
+                            truncated = truncated[:last_space]
+                        reply = truncated + "…"
+                    return reply
+            except Exception as tool_err:
+                logger.warning(
+                    f"Multimodal Gemini call with tools failed ({type(tool_err).__name__}: {tool_err}); "
+                    "falling back immediately to standard generation without tools."
+                )
+                config.tools = None
 
-                if not response or not response.text:
-                    logger.warning("Gemini returned empty response")
-                    return None
+        # Standard generation without tools (with retry loop and model fallback)
+        last_error = None
+        candidate_models = [self.model]
+        if "1.5" in self.model:
+            candidate_models.append("gemini-2.0-flash")
+        elif "2.0" in self.model:
+            candidate_models.append("gemini-1.5-flash")
 
-                reply = response.text.strip()
-
-                # Enforce character limit
-                if max_length and len(reply) > max_length:
-                    # Try to cut at word boundary
-                    truncated = reply[:max_length]
-                    last_space = truncated.rfind(" ")
-                    if last_space > max_length * 0.8:
-                        truncated = truncated[:last_space]
-                    reply = truncated + "…"
-
-                return reply
-
-            except Exception as e:
-                last_error = e
-                if attempt < MAX_RETRIES and _is_retryable_error(e):
-                    delay = BASE_DELAY_SECONDS * (2 ** attempt)
-                    logger.warning(
-                        f"Gemini API transient error (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
-                        f"retrying in {delay:.1f}s: {type(e).__name__}: {e}"
+        for model_name in candidate_models:
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    response = await client.aio.models.generate_content(
+                        model=model_name,
+                        contents=contents,
+                        config=config,
                     )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"Gemini API error: {type(e).__name__}: {e}")
-                    raise
 
-        # Should not reach here, but just in case
-        logger.error(f"Gemini API failed after {MAX_RETRIES + 1} attempts: {last_error}")
+                    if not response or not response.text:
+                        logger.warning(f"Multimodal Gemini returned empty response from {model_name}")
+                        continue
+
+                    reply = response.text.strip()
+
+                    # Enforce character limit
+                    if max_length and len(reply) > max_length:
+                        truncated = reply[:max_length]
+                        last_space = truncated.rfind(" ")
+                        if last_space > max_length * 0.8:
+                            truncated = truncated[:last_space]
+                        reply = truncated + "…"
+
+                    return reply
+
+                except Exception as e:
+                    last_error = e
+                    if attempt < MAX_RETRIES and _is_retryable_error(e):
+                        delay = BASE_DELAY_SECONDS * (2 ** attempt)
+                        logger.warning(
+                            f"Multimodal Gemini API transient error on {model_name} (attempt {attempt + 1}/{MAX_RETRIES + 1}), "
+                            f"retrying in {delay:.1f}s: {type(e).__name__}: {e}"
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.warning(f"Multimodal Gemini model {model_name} attempt error: {type(e).__name__}: {e}")
+                        break
+
+        logger.error(f"Multimodal Gemini API failed across candidate models: {last_error}")
         raise last_error
 
 
