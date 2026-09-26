@@ -285,7 +285,7 @@ async def process_incoming_message(
                     if transcribed_audio_text:
                         logger.info(f"Incoming audio successfully transcribed: '{transcribed_audio_text}'")
                         content = f"[Voice Note: {transcribed_audio_text}]"
-                        incoming_msg.content = content
+                        saved_msg.content = content
                         db.commit()
                 except Exception as t_err:
                     logger.warning(f"Voice transcription attempt failed: {t_err}")
@@ -427,7 +427,12 @@ async def process_incoming_message(
                 account.user_id
             )
 
-        return {"reply": reply, "audio_path": audio_path}
+        return {
+            "reply": reply,
+            "audio_path": audio_path,
+            "conversation_id": conv.id,
+            "message_id": ai_msg.id,
+        }
 
     except Exception as e:
         logger.error(f"Error processing message: {e}", exc_info=True)
@@ -439,26 +444,30 @@ async def process_incoming_message(
 async def update_outgoing_message_status(
     account_id: str,
     conversation_id: str,
-    message_content: str,
-    success: bool
+    message_content: Optional[str] = None,
+    success: bool = True,
+    message_id: Optional[str] = None,
 ):
     """Update the status of a sent message."""
     db = SessionLocal()
     try:
-        msg = (
-            db.query(Message)
-            .filter(
-                Message.conversation_id == conversation_id,
-                Message.content == message_content,
-                Message.direction == MessageDirection.outgoing,
-                Message.status == MessageStatus.pending,
+        query = db.query(Message).filter(Message.conversation_id == conversation_id)
+        if message_id:
+            msg = query.filter(Message.id == message_id).first()
+        else:
+            msg = (
+                query.filter(
+                    Message.content == message_content,
+                    Message.direction == MessageDirection.outgoing,
+                    Message.status == MessageStatus.pending,
+                )
+                .order_by(Message.created_at.desc())
+                .first()
             )
-            .order_by(Message.created_at.desc())
-            .first()
-        )
         if msg:
             msg.status = MessageStatus.sent if success else MessageStatus.failed
             db.commit()
+            logger.info(f"Updated message {msg.id} status to {msg.status}")
     except Exception as e:
         logger.error(f"Error updating message status: {e}")
     finally:

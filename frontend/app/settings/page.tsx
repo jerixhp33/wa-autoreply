@@ -277,20 +277,20 @@ export default function SettingsPage() {
                         onChange={(e) => setForm(f => ({ ...f, voice_name: e.target.value }))}
                         className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-whatsapp"
                       >
-                        <optgroup label="⚡ Groq PlayAI Studio Voices (Ultra Quality)">
-                          <option value="Fritz-PlayAI">Groq PlayAI - Fritz (Dynamic Male)</option>
-                          <option value="Aria-PlayAI">Groq PlayAI - Aria (Expressive Female)</option>
-                          <option value="Dexter-PlayAI">Groq PlayAI - Dexter (Deep Male)</option>
-                        </optgroup>
-                        <optgroup label="Microsoft Natural Neural Voices">
-                          <option value="en-IN-NeerjaNeural">🇮🇳 Indian English (Female - Neerja)</option>
-                          <option value="en-IN-PrabhatNeural">🇮🇳 Indian English (Male - Prabhat)</option>
+                        <optgroup label="🎙️ High-Quality Studio Voices (Tamil, Hindi, English)">
                           <option value="ta-IN-PallaviNeural">🇮🇳 Tamil (Female - Pallavi)</option>
                           <option value="ta-IN-ValluvarNeural">🇮🇳 Tamil (Male - Valluvar)</option>
+                          <option value="en-IN-NeerjaNeural">🇮🇳 Indian English (Female - Neerja)</option>
+                          <option value="en-IN-PrabhatNeural">🇮🇳 Indian English (Male - Prabhat)</option>
                           <option value="hi-IN-SwaraNeural">🇮🇳 Hindi (Female - Swara)</option>
                           <option value="hi-IN-MadhurNeural">🇮🇳 Hindi (Male - Madhur)</option>
                           <option value="en-US-JennyNeural">🇺🇸 US English (Female - Jenny)</option>
                           <option value="en-US-GuyNeural">🇺🇸 US English (Male - Guy)</option>
+                        </optgroup>
+                        <optgroup label="⚡ Alternative Voices">
+                          <option value="Aria-PlayAI">Aria (Expressive Female)</option>
+                          <option value="Fritz-PlayAI">Fritz (Dynamic Male)</option>
+                          <option value="Dexter-PlayAI">Dexter (Deep Male)</option>
                         </optgroup>
                       </select>
                     </div>

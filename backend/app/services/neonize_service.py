@@ -384,20 +384,80 @@ class WhatsAppSession:
 
         try:
             from neonize.client import build_jid
+            from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import AudioMessage, Message
+            from neonize.utils.enum import MediaType
+            import math
 
             abs_path = os.path.abspath(audio_path)
-            # CRITICAL: WhatsApp media transfers require the standard phone JID (@s.whatsapp.net).
-            # Do NOT use LID JID for sending media/audio.
-            jid = build_jid(phone, "s.whatsapp.net")
+            clean_phone = "".join(c for c in phone if c.isdigit())
+            jid = build_jid(clean_phone, "s.whatsapp.net")
 
-            if hasattr(self.client, "send_audio"):
-                self.client.send_audio(jid, abs_path, ptt=is_ptt)
-                logger.info(f"Voice note sent to {phone} via send_audio: {abs_path}")
-                return True
-            else:
-                raise NotImplementedError("neonize NewClient has no send_audio attribute")
+            # Try to resolve phone to LID for routing in modern WhatsApp clients
+            try:
+                lid_jid = self.client.get_lid_from_pn(jid)
+                if lid_jid and lid_jid.User:
+                    logger.info(f"Resolved phone {clean_phone} -> LID {lid_jid.User} for audio delivery")
+                    jid = lid_jid
+            except Exception as lid_err:
+                logger.debug(f"LID resolution skipped for {clean_phone}: {lid_err}")
+
+            with open(abs_path, "rb") as f:
+                audio_bytes = f.read()
+
+            # Upload audio to WhatsApp media servers
+            upload = self.client.upload(audio_bytes, MediaType.MediaAudio)
+
+            # Extract duration safely via ffprobe or default
+            duration = 2
+            try:
+                from neonize.utils.ffmpeg import FFmpeg
+                with FFmpeg(audio_bytes) as ffmpeg:
+                    info = ffmpeg.extract_info()
+                    if info and info.format and info.format.duration:
+                        duration = max(1, int(float(info.format.duration)))
+            except Exception as dur_err:
+                logger.debug(f"Duration probe failed ({dur_err}), defaulting to 2s")
+
+            # WhatsApp Mobile Voice Note requires a 64-byte waveform amplitude array (values 0-100)
+            waveform = bytes([
+                min(100, max(12, int(45 + 35 * math.sin(i / 2.8) + (i % 6) * 4)))
+                for i in range(64)
+            ])
+
+            # WhatsApp mobile (iOS & Android) strictly requires "audio/ogg; codecs=opus" for PTT playback
+            mimetype = "audio/ogg; codecs=opus" if is_ptt else "audio/ogg"
+
+            audio_msg = AudioMessage(
+                URL=upload.url,
+                directPath=upload.DirectPath,
+                mediaKey=upload.MediaKey,
+                fileSHA256=upload.FileSHA256,
+                fileEncSHA256=upload.FileEncSHA256,
+                fileLength=upload.FileLength,
+                seconds=duration,
+                mimetype=mimetype,
+                PTT=is_ptt,
+                waveform=waveform if is_ptt else None,
+            )
+            msg_envelope = Message(audioMessage=audio_msg)
+
+            # Send via client.send_message
+            self.client.send_message(jid, msg_envelope)
+            logger.info(f"Voice note ({len(audio_bytes)} bytes, {duration}s, mime: {mimetype}) sent to {clean_phone}")
+            return True
+
         except Exception as e:
             logger.error(f"Failed to send voice note to {phone}: {e}", exc_info=True)
+            # Fallback to neonize built-in send_audio if direct protobuf failed
+            try:
+                from neonize.client import build_jid
+                jid = build_jid("".join(c for c in phone if c.isdigit()), "s.whatsapp.net")
+                if hasattr(self.client, "send_audio"):
+                    self.client.send_audio(jid, os.path.abspath(audio_path), ptt=is_ptt)
+                    logger.info(f"Voice note sent via fallback send_audio to {phone}")
+                    return True
+            except Exception as fb_err:
+                logger.error(f"Fallback send_audio also failed: {fb_err}")
             raise
 
     def stop(self):

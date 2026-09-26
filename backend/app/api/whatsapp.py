@@ -173,24 +173,52 @@ async def handle_message(
     if res:
         reply_text = res.get("reply") if isinstance(res, dict) else res
         audio_path = res.get("audio_path") if isinstance(res, dict) else None
+        conversation_id = res.get("conversation_id") if isinstance(res, dict) else None
+        msg_id = res.get("message_id") if isinstance(res, dict) else None
+
+        from app.services.message_service import update_outgoing_message_status
 
         if audio_path:
+            sent_audio = False
             try:
                 await neonize_manager.send_audio(account_id, sender, audio_path, is_ptt=True)
                 logger.info(f"AI voice note sent to {sender}")
+                sent_audio = True
             except Exception as e:
                 logger.warning(f"Failed to send voice note, falling back to text: {e}")
                 if reply_text:
                     try:
                         await neonize_manager.send_message(account_id, sender, reply_text)
+                        sent_audio = True
+                        logger.info(f"AI text fallback sent to {sender}")
                     except Exception as send_err:
                         logger.error(f"Failed to send text fallback: {send_err}")
+
+            if conversation_id:
+                await update_outgoing_message_status(
+                    account_id=account_id,
+                    conversation_id=conversation_id,
+                    message_content=reply_text,
+                    success=sent_audio,
+                    message_id=msg_id,
+                )
         elif reply_text:
+            sent_text = False
             try:
                 await neonize_manager.send_message(account_id, sender, reply_text)
                 logger.info(f"AI reply sent to {sender}")
+                sent_text = True
             except Exception as e:
                 logger.error(f"Failed to send AI reply: {e}")
+
+            if conversation_id:
+                await update_outgoing_message_status(
+                    account_id=account_id,
+                    conversation_id=conversation_id,
+                    message_content=reply_text,
+                    success=sent_text,
+                    message_id=msg_id,
+                )
 
 
 async def start_whatsapp_session(account_id: str):
