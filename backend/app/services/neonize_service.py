@@ -34,6 +34,7 @@ class WhatsAppSession:
         on_disconnected: Callable,
         on_message: Callable,
         loop: asyncio.AbstractEventLoop,
+        on_logged_out: Optional[Callable] = None,
     ):
         self.account_id = account_id
         self.session_name = session_name
@@ -41,6 +42,7 @@ class WhatsAppSession:
         self.on_connected = on_connected
         self.on_disconnected = on_disconnected
         self.on_message = on_message
+        self.on_logged_out = on_logged_out or on_disconnected
         self.loop = loop
         self.client = None
         self.connected = False
@@ -136,18 +138,19 @@ class WhatsAppSession:
                 else:
                     logger.info(f"Account {self.account_id} ConnectedEv before pairing (waiting for QR scan)")
 
-            # ── Disconnected event ────────────────────────────────────────
+            # ── Disconnected event (socket temporary drop) ───────────────
             @client.event(DisconnectedEv)
             def on_disconnected_ev(c, event: DisconnectedEv):
                 self.connected = False
+                logger.warning(f"DisconnectedEv: WhatsApp socket dropped for {self.account_id}")
                 _safe_schedule(self.on_disconnected(self.account_id))
 
-            # ── LoggedOut event ───────────────────────────────────────────
+            # ── LoggedOut event (device revoked on phone) ─────────────────
             @client.event(LoggedOutEv)
             def on_logged_out(c, event: LoggedOutEv):
                 self.connected = False
-                logger.warning(f"Account {self.account_id} was logged out")
-                _safe_schedule(self.on_disconnected(self.account_id))
+                logger.warning(f"LoggedOutEv: Account {self.account_id} was permanently logged out on phone")
+                _safe_schedule(self.on_logged_out(self.account_id))
 
             # ── Message event ─────────────────────────────────────────────
             @client.event(MessageEv)
@@ -473,7 +476,7 @@ class WhatsAppSession:
             except Exception as e:
                 logger.warning(f"Could not disconnect client: {e}")
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=0.5)
+            self._thread.join(timeout=2.0)
 
 
 class NeonizeManager:
@@ -500,6 +503,7 @@ class NeonizeManager:
         on_connected: Callable,
         on_disconnected: Callable,
         on_message: Callable,
+        on_logged_out: Optional[Callable] = None,
     ):
         """Register event callbacks for an account."""
         self._callbacks[account_id] = {
@@ -507,6 +511,7 @@ class NeonizeManager:
             "on_connected": on_connected,
             "on_disconnected": on_disconnected,
             "on_message": on_message,
+            "on_logged_out": on_logged_out or on_disconnected,
         }
 
     async def start_session(self, account_id: str, session_name: str) -> WhatsAppSession:
@@ -519,6 +524,8 @@ class NeonizeManager:
                     return existing
                 await asyncio.get_event_loop().run_in_executor(None, existing.stop)
                 self.sessions.pop(account_id, None)
+                # Wait 1.5s for OS file lock and Go C-FFI runtime to completely release SQLite handles
+                await asyncio.sleep(1.5)
 
             callbacks = self._callbacks.get(account_id, {})
             loop = asyncio.get_running_loop()
@@ -530,6 +537,7 @@ class NeonizeManager:
                 on_connected=callbacks.get("on_connected", self._noop),
                 on_disconnected=callbacks.get("on_disconnected", self._noop),
                 on_message=callbacks.get("on_message", self._noop),
+                on_logged_out=callbacks.get("on_logged_out", self._noop),
                 loop=loop,
             )
 

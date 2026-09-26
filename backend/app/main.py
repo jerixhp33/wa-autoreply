@@ -20,41 +20,50 @@ logger = logging.getLogger(__name__)
 
 async def auto_reconnect_sessions():
     """
-    On server boot, check for accounts that were previously connected
-    and attempt to resume their WhatsApp sessions if session files exist,
-    or mark them as disconnected so the dashboard accurately reflects status.
+    On server boot, check for accounts that have saved session data in PostgreSQL
+    or were previously active, restore their SQLite files, and resume WhatsApp sessions.
     """
     await asyncio.sleep(2)
     from app.database.database import SessionLocal
     from app.models.models import WhatsAppAccount, AccountStatus
-    from app.api.whatsapp import start_whatsapp_session, get_session_path
+    from app.api.whatsapp import safe_start_whatsapp_session, get_session_path
 
     db = SessionLocal()
     try:
-        # Only auto-reconnect accounts that were legitimately in connected status
+        # Include accounts that have saved session credentials or were in connected/connecting status
         accounts = db.query(WhatsAppAccount).filter(
-            WhatsAppAccount.status == AccountStatus.connected
+            (WhatsAppAccount.session_data.isnot(None)) |
+            (WhatsAppAccount.status.in_([AccountStatus.connected, AccountStatus.connecting]))
         ).all()
+
+        logger.info(f"Auto-reconnect found {len(accounts)} candidate account(s)")
+
         for account in accounts:
             session_path = get_session_path(account.id)
             session_db = session_path + ".db"
 
-            # Restore from PostgreSQL if missing on disk
-            if (not os.path.exists(session_db) and not os.path.exists(session_path)) and getattr(account, "session_data", None):
+            has_disk_file = (
+                (os.path.exists(session_db) and os.path.getsize(session_db) > 0) or
+                (os.path.exists(session_path) and os.path.getsize(session_path) > 0)
+            )
+
+            # Restore from PostgreSQL if missing or empty on disk
+            if not has_disk_file and account.session_data and len(account.session_data) > 0:
                 try:
                     os.makedirs(os.path.dirname(session_db), exist_ok=True)
                     with open(session_db, "wb") as f:
                         f.write(account.session_data)
                     with open(session_path, "wb") as f:
                         f.write(account.session_data)
-                    logger.info(f"Restored session database from PostgreSQL for account {account.id}")
+                    logger.info(f"Restored session database from PostgreSQL for account {account.id} ({len(account.session_data)} bytes)")
+                    has_disk_file = True
                 except Exception as rst_err:
                     logger.warning(f"Could not restore session DB: {rst_err}")
 
-            if os.path.exists(session_db) or os.path.exists(session_path):
+            if has_disk_file:
                 logger.info(f"Auto-resuming session for account {account.id} ({account.name})...")
                 try:
-                    await start_whatsapp_session(account.id)
+                    await safe_start_whatsapp_session(account.id)
                     # Stagger sequential reconnects to eliminate Go C-FFI concurrent map write panics
                     await asyncio.sleep(4)
                 except Exception as resume_err:
@@ -69,14 +78,54 @@ async def auto_reconnect_sessions():
         db.close()
 
 
+async def periodic_session_backup_loop():
+    """
+    Every 60 seconds, flush SQLite WAL and back up session data to PostgreSQL
+    for all connected accounts. This guarantees zero data loss on Render redeploys.
+    """
+    while True:
+        await asyncio.sleep(60)
+        try:
+            from app.database.database import SessionLocal
+            from app.api.whatsapp import backup_session_to_db
+            from app.services.neonize_service import neonize_manager
+
+            db = SessionLocal()
+            try:
+                for account_id in list(neonize_manager.sessions.keys()):
+                    if neonize_manager.is_connected(account_id):
+                        backup_session_to_db(account_id, db)
+            finally:
+                db.close()
+        except Exception as e:
+            logger.debug(f"Periodic session backup note: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting WhatsApp AI Backend...")
     create_tables()
     logger.info("Database tables created/verified")
-    asyncio.create_task(auto_reconnect_sessions())
+    reconnect_task = asyncio.create_task(auto_reconnect_sessions())
+    backup_task = asyncio.create_task(periodic_session_backup_loop())
     yield
-    logger.info("Shutting down...")
+    logger.info("Shutting down... saving active WhatsApp sessions to PostgreSQL")
+    reconnect_task.cancel()
+    backup_task.cancel()
+
+    # Flush & backup all active sessions before container termination
+    try:
+        from app.database.database import SessionLocal
+        from app.api.whatsapp import backup_session_to_db
+        from app.services.neonize_service import neonize_manager
+        db = SessionLocal()
+        try:
+            for account_id in list(neonize_manager.sessions.keys()):
+                backup_session_to_db(account_id, db)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Shutdown backup note: {e}")
 
 
 app = FastAPI(

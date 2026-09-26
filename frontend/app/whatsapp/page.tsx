@@ -24,6 +24,7 @@ function QRModal({
   const { on } = useWebSocket();
 
   useEffect(() => {
+    let interval: NodeJS.Timeout;
     // Poll for QR
     const loadQR = async () => {
       try {
@@ -31,6 +32,7 @@ function QRModal({
         setQrData(res.data.qr_code);
         setStatus(res.data.status);
         if (res.data.status === 'connected') {
+          if (interval) clearInterval(interval);
           toast.success('WhatsApp connected successfully!');
           setTimeout(onClose, 1200);
         }
@@ -40,7 +42,7 @@ function QRModal({
     };
 
     loadQR();
-    const interval = setInterval(loadQR, 1200);
+    interval = setInterval(loadQR, 2500);
     return () => clearInterval(interval);
   }, [account.id, onClose]);
 

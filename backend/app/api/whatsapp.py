@@ -53,6 +53,51 @@ async def handle_qr(account_id: str, qr_data: str):
         db.close()
 
 
+def backup_session_to_db(account_id: str, db: Session):
+    """
+    Checkpoints SQLite WAL and backs up the entire session database
+    to PostgreSQL for persistent durability across Render redeploys and restarts.
+    """
+    session_path = get_session_path(account_id)
+    session_db = session_path + ".db"
+    candidates = [
+        session_db,
+        session_path,
+        session_path + ".sqlite3",
+        session_path + ".sqlite",
+    ]
+    target_file = None
+    for cand in candidates:
+        if os.path.exists(cand) and os.path.isfile(cand) and os.path.getsize(cand) > 0:
+            target_file = cand
+            break
+
+    if not target_file:
+        return
+
+    # Checkpoint SQLite WAL to flush all active transactions and keys into the primary DB file
+    try:
+        import sqlite3
+        conn = sqlite3.connect(target_file, timeout=5.0)
+        conn.execute("PRAGMA wal_checkpoint(FULL);")
+        conn.commit()
+        conn.close()
+    except Exception as wal_err:
+        logger.debug(f"WAL checkpoint note for {account_id}: {wal_err}")
+
+    try:
+        with open(target_file, "rb") as f:
+            data = f.read()
+        if data and len(data) > 0:
+            account = db.query(WhatsAppAccount).filter(WhatsAppAccount.id == account_id).first()
+            if account:
+                account.session_data = data
+                db.commit()
+                logger.info(f"Backed up session DB to PostgreSQL for account {account_id} ({len(data)} bytes)")
+    except Exception as e:
+        logger.warning(f"Could not backup session DB for {account_id}: {e}")
+
+
 async def handle_connected(account_id: str, phone_number: str):
     """Handle successful WhatsApp connection."""
     from app.database.database import SessionLocal
@@ -66,26 +111,11 @@ async def handle_connected(account_id: str, phone_number: str):
             account.qr_code = None
             if phone_number:
                 account.phone_number = phone_number
-
-            # Backup session SQLite database file to PostgreSQL
-            session_path = get_session_path(account_id)
-            candidates = [
-                session_path + ".db",
-                session_path,
-                session_path + ".sqlite3",
-                session_path + ".sqlite",
-            ]
-            for cand in candidates:
-                if os.path.exists(cand) and os.path.isfile(cand) and os.path.getsize(cand) > 0:
-                    try:
-                        with open(cand, "rb") as f:
-                            account.session_data = f.read()
-                        logger.info(f"Backed up WhatsApp session to PostgreSQL for account {account_id} from {cand} ({len(account.session_data)} bytes)")
-                        break
-                    except Exception as bkp_err:
-                        logger.warning(f"Could not backup session DB from {cand}: {bkp_err}")
-
             db.commit()
+
+            # Immediate WAL checkpoint and persistent backup to PostgreSQL
+            backup_session_to_db(account_id, db)
+
             await ws_manager.send_to_user(
                 account.user_id,
                 "account_connected",
@@ -102,7 +132,14 @@ async def handle_connected(account_id: str, phone_number: str):
 
 
 async def handle_disconnected(account_id: str):
-    """Handle WhatsApp disconnection."""
+    """Handle temporary socket disconnect without erasing session credentials."""
+    logger.warning(f"Account {account_id} socket disconnected; waiting for reconnect...")
+    # NOTE: Do NOT erase session_data or mark permanently disconnected in DB!
+    # whatsmeow will automatically re-establish the socket connection.
+
+
+async def handle_logged_out(account_id: str):
+    """Handle permanent WhatsApp logout (device unlinked on phone)."""
     from app.database.database import SessionLocal
     db = SessionLocal()
     try:
@@ -111,14 +148,26 @@ async def handle_disconnected(account_id: str):
         ).first()
         if account:
             account.status = AccountStatus.disconnected
+            account.session_data = None
+            account.qr_code = None
             db.commit()
+
+            # Clean disk files
+            session_path = get_session_path(account_id)
+            for fpath in [session_path + ".db", session_path, session_path + ".db-wal", session_path + ".db-shm"]:
+                if os.path.exists(fpath):
+                    try:
+                        os.remove(fpath)
+                    except Exception:
+                        pass
+
             await ws_manager.send_to_user(
                 account.user_id,
                 "account_disconnected",
                 {"account_id": account_id, "status": "disconnected"}
             )
     except Exception as e:
-        logger.error(f"Disconnected handler error: {e}")
+        logger.error(f"Logged out handler error: {e}")
     finally:
         db.close()
 
@@ -221,18 +270,38 @@ async def handle_message(
                 )
 
 
+_pending_starts: set = set()
+
+
+async def safe_start_whatsapp_session(account_id: str):
+    """Start WhatsApp session with in-flight deduplication to prevent duplicate tasks."""
+    if account_id in _pending_starts:
+        logger.info(f"Session start already in progress for account {account_id}, ignoring duplicate request")
+        return
+    _pending_starts.add(account_id)
+    try:
+        await start_whatsapp_session(account_id)
+    finally:
+        _pending_starts.discard(account_id)
+
+
 async def start_whatsapp_session(account_id: str):
-    """Start a WhatsApp session in background."""
+    """Start a WhatsApp session in background, restoring persistent DB if missing."""
     session_path = get_session_path(account_id)
     session_db = session_path + ".db"
 
     # Restore session database from PostgreSQL if not present on disk
-    if not os.path.exists(session_db) and not os.path.exists(session_path):
+    has_disk_file = (
+        (os.path.exists(session_db) and os.path.getsize(session_db) > 0) or
+        (os.path.exists(session_path) and os.path.getsize(session_path) > 0)
+    )
+
+    if not has_disk_file:
         from app.database.database import SessionLocal
         db = SessionLocal()
         try:
             account = db.query(WhatsAppAccount).filter(WhatsAppAccount.id == account_id).first()
-            if account and account.session_data:
+            if account and account.session_data and len(account.session_data) > 0:
                 os.makedirs(os.path.dirname(session_db), exist_ok=True)
                 with open(session_db, "wb") as f:
                     f.write(account.session_data)
@@ -250,6 +319,7 @@ async def start_whatsapp_session(account_id: str):
         on_connected=handle_connected,
         on_disconnected=handle_disconnected,
         on_message=handle_message,
+        on_logged_out=handle_logged_out,
     )
 
     try:
@@ -296,8 +366,8 @@ async def create_account(
     db.commit()
     db.refresh(account)
 
-    # Start WhatsApp session in background
-    background_tasks.add_task(start_whatsapp_session, account.id)
+    # Start WhatsApp session in background safely
+    background_tasks.add_task(safe_start_whatsapp_session, account.id)
 
     return WhatsAppAccountResponse.model_validate(account)
 
@@ -315,15 +385,19 @@ async def list_accounts(
     )
     for a in accounts:
         is_conn = neonize_manager.is_connected(a.id)
-        if is_conn and a.status != AccountStatus.connected:
-            a.status = AccountStatus.connected
-            session = neonize_manager.get_session(a.id)
-            if session and session.phone_number:
-                a.phone_number = session.phone_number
-            db.commit()
-        elif not is_conn and a.status == AccountStatus.connected:
-            a.status = AccountStatus.disconnected
-            db.commit()
+        if is_conn:
+            if a.status != AccountStatus.connected:
+                a.status = AccountStatus.connected
+                session = neonize_manager.get_session(a.id)
+                if session and session.phone_number:
+                    a.phone_number = session.phone_number
+                db.commit()
+        else:
+            # DO NOT overwrite a.status to disconnected in a GET endpoint!
+            # If account was connected and has session credentials, resume it in the background
+            if a.status == AccountStatus.connected and a.id not in neonize_manager.sessions and a.id not in _pending_starts:
+                logger.info(f"Auto-triggering resume for active account {a.id}")
+                asyncio.create_task(safe_start_whatsapp_session(a.id))
     return [WhatsAppAccountResponse.model_validate(a) for a in accounts]
 
 
@@ -341,15 +415,16 @@ async def get_account(
         raise HTTPException(status_code=404, detail="Account not found")
 
     is_conn = neonize_manager.is_connected(account.id)
-    if is_conn and account.status != AccountStatus.connected:
-        account.status = AccountStatus.connected
-        session = neonize_manager.get_session(account.id)
-        if session and session.phone_number:
-            account.phone_number = session.phone_number
-        db.commit()
-    elif not is_conn and account.status == AccountStatus.connected:
-        account.status = AccountStatus.disconnected
-        db.commit()
+    if is_conn:
+        if account.status != AccountStatus.connected:
+            account.status = AccountStatus.connected
+            session = neonize_manager.get_session(account.id)
+            if session and session.phone_number:
+                account.phone_number = session.phone_number
+            db.commit()
+    elif account.status == AccountStatus.connected and account.id not in neonize_manager.sessions and account.id not in _pending_starts:
+        logger.info(f"Auto-triggering resume for active account {account.id}")
+        asyncio.create_task(safe_start_whatsapp_session(account.id))
 
     return WhatsAppAccountResponse.model_validate(account)
 
@@ -369,17 +444,19 @@ async def get_qr(
         raise HTTPException(status_code=404, detail="Account not found")
 
     is_conn = neonize_manager.is_connected(account.id)
-    if is_conn and account.status != AccountStatus.connected:
-        account.status = AccountStatus.connected
-        account.qr_code = None
-        db.commit()
-    elif not is_conn and account.status != AccountStatus.connected:
-        # If no active session is running for this account, auto-start it so the QR code generates immediately
-        if account_id not in neonize_manager.sessions:
-            logger.info(f"Auto-starting session for account {account_id} on get_qr poll")
-            account.status = AccountStatus.connecting
+    if is_conn:
+        if account.status != AccountStatus.connected:
+            account.status = AccountStatus.connected
+            account.qr_code = None
             db.commit()
-            background_tasks.add_task(start_whatsapp_session, account.id)
+        return QRResponse(qr_code=None, status="connected")
+
+    # If no active session is running and none is starting, auto-start once safely
+    if account_id not in neonize_manager.sessions and account_id not in _pending_starts:
+        logger.info(f"Auto-starting session for account {account_id} on get_qr poll")
+        account.status = AccountStatus.connecting
+        db.commit()
+        background_tasks.add_task(safe_start_whatsapp_session, account.id)
 
     return QRResponse(
         qr_code=account.qr_code if not is_conn else None,
@@ -401,14 +478,18 @@ async def reconnect_account(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
+    if neonize_manager.is_connected(account_id):
+        return WhatsAppAccountResponse.model_validate(account)
+
     await neonize_manager.stop_session(account_id)
+    await asyncio.sleep(1.0)  # Ensure SQLite file lock release
 
     account.status = AccountStatus.connecting
     account.qr_code = None
     db.commit()
     db.refresh(account)
 
-    background_tasks.add_task(start_whatsapp_session, account.id)
+    background_tasks.add_task(safe_start_whatsapp_session, account.id)
     return WhatsAppAccountResponse.model_validate(account)
 
 
