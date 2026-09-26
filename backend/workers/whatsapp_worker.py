@@ -109,25 +109,49 @@ async def on_message(
     content: str,
     is_group: bool,
     message_id: str = None,
+    media_path: str = None,
+    media_type: str = "text",
+    mime_type: str = None,
+    caption: str = None,
+    **kwargs,
 ):
     """Handle incoming message and generate AI reply."""
-    logger.info(f"Message from {sender} on {account_id}: {content[:50]}...")
+    logger.info(f"Message from {sender} on {account_id}: {content[:50] if content else media_type}...")
 
-    reply = await process_incoming_message(
+    res = await process_incoming_message(
         account_id=account_id,
         sender=sender,
         content=content,
         is_group=is_group,
         message_id=message_id,
         ws_callback=None,
+        media_path=media_path,
+        media_type=media_type,
+        mime_type=mime_type,
+        caption=caption,
     )
 
-    if reply:
-        try:
-            await neonize_manager.send_message(account_id, sender, reply)
-            logger.info(f"AI reply sent to {sender}")
-        except Exception as e:
-            logger.error(f"Failed to send AI reply to {sender}: {e}")
+    if res:
+        reply_text = res.get("reply") if isinstance(res, dict) else res
+        audio_path = res.get("audio_path") if isinstance(res, dict) else None
+
+        if audio_path:
+            try:
+                await neonize_manager.send_audio(account_id, sender, audio_path, is_ptt=True)
+                logger.info(f"AI voice note sent to {sender}")
+            except Exception as e:
+                logger.warning(f"Failed to send voice note, falling back to text: {e}")
+                if reply_text:
+                    try:
+                        await neonize_manager.send_message(account_id, sender, reply_text)
+                    except Exception as send_err:
+                        logger.error(f"Failed to send text fallback: {send_err}")
+        elif reply_text:
+            try:
+                await neonize_manager.send_message(account_id, sender, reply_text)
+                logger.info(f"AI reply sent to {sender}")
+            except Exception as e:
+                logger.error(f"Failed to send AI reply to {sender}: {e}")
 
 
 async def start_account_session(account_id: str):

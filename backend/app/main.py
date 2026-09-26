@@ -1,3 +1,5 @@
+import asyncio
+import os
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -16,11 +18,44 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def auto_reconnect_sessions():
+    """
+    On server boot, check for accounts that were previously connected
+    and attempt to resume their WhatsApp sessions if session files exist,
+    or mark them as disconnected so the dashboard accurately reflects status.
+    """
+    await asyncio.sleep(2)
+    from app.database.database import SessionLocal
+    from app.models.models import WhatsAppAccount, AccountStatus
+    from app.api.whatsapp import start_whatsapp_session, get_session_path
+
+    db = SessionLocal()
+    try:
+        accounts = db.query(WhatsAppAccount).filter(
+            WhatsAppAccount.status.in_([AccountStatus.connected, AccountStatus.connecting])
+        ).all()
+        for account in accounts:
+            session_path = get_session_path(account.id)
+            session_db = session_path + ".db"
+            if os.path.exists(session_db):
+                logger.info(f"Auto-resuming session for account {account.id} ({account.name})...")
+                asyncio.create_task(start_whatsapp_session(account.id))
+            else:
+                logger.info(f"No existing session database for account {account.id}, marking disconnected")
+                account.status = AccountStatus.disconnected
+                db.commit()
+    except Exception as e:
+        logger.error(f"Error during auto-reconnect: {e}")
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting WhatsApp AI Backend...")
     create_tables()
     logger.info("Database tables created/verified")
+    asyncio.create_task(auto_reconnect_sessions())
     yield
     logger.info("Shutting down...")
 

@@ -146,18 +146,34 @@ class WhatsAppSession:
                     caption = None
                     msg = event.Message
 
+                    # Unwrap any container wrappers (ephemeral, viewOnce, etc.)
+                    for _ in range(5):
+                        try:
+                            if hasattr(msg, "ephemeralMessage") and msg.HasField("ephemeralMessage") and msg.ephemeralMessage.message:
+                                msg = msg.ephemeralMessage.message
+                            elif hasattr(msg, "viewOnceMessage") and msg.HasField("viewOnceMessage") and msg.viewOnceMessage.message:
+                                msg = msg.viewOnceMessage.message
+                            elif hasattr(msg, "viewOnceMessageV2") and msg.HasField("viewOnceMessageV2") and msg.viewOnceMessageV2.message:
+                                msg = msg.viewOnceMessageV2.message
+                            elif hasattr(msg, "documentWithCaptionMessage") and msg.HasField("documentWithCaptionMessage") and msg.documentWithCaptionMessage.message:
+                                msg = msg.documentWithCaptionMessage.message
+                            else:
+                                break
+                        except Exception:
+                            break
+
                     # Check protobuf HasField for accurate media type detection
                     has_image = False
                     has_audio = False
                     try:
                         has_image = msg.HasField("imageMessage")
                     except Exception:
-                        has_image = bool(msg.imageMessage and (getattr(msg.imageMessage, "url", None) or getattr(msg.imageMessage, "directPath", None)))
+                        has_image = bool(getattr(msg, "imageMessage", None) and (getattr(msg.imageMessage, "url", None) or getattr(msg.imageMessage, "directPath", None)))
 
                     try:
                         has_audio = msg.HasField("audioMessage")
                     except Exception:
-                        has_audio = bool(msg.audioMessage and (getattr(msg.audioMessage, "url", None) or getattr(msg.audioMessage, "directPath", None)))
+                        has_audio = bool(getattr(msg, "audioMessage", None) and (getattr(msg.audioMessage, "url", None) or getattr(msg.audioMessage, "directPath", None)))
 
                     if msg.conversation:
                         content = msg.conversation
@@ -170,7 +186,17 @@ class WhatsAppSession:
                         content = caption or "[Image]"
                         # Download image
                         try:
-                            media_bytes = c.download_any(msg)
+                            media_bytes = None
+                            try:
+                                media_bytes = c.download_any(msg)
+                            except Exception:
+                                pass
+                            if not media_bytes and hasattr(msg, "imageMessage"):
+                                try:
+                                    media_bytes = c.download_any(msg.imageMessage)
+                                except Exception:
+                                    pass
+
                             if media_bytes:
                                 import os
                                 from app.config import settings
@@ -190,7 +216,17 @@ class WhatsAppSession:
                         content = "[Voice Note]"
                         # Download audio
                         try:
-                            media_bytes = c.download_any(msg)
+                            media_bytes = None
+                            try:
+                                media_bytes = c.download_any(msg)
+                            except Exception:
+                                pass
+                            if not media_bytes and hasattr(msg, "audioMessage"):
+                                try:
+                                    media_bytes = c.download_any(msg.audioMessage)
+                                except Exception:
+                                    pass
+
                             if media_bytes:
                                 import os
                                 from app.config import settings
@@ -330,11 +366,14 @@ class WhatsAppSession:
             except Exception:
                 pass
 
-            if hasattr(self.client, "build_audio_message"):
+            if hasattr(self.client, "send_audio"):
+                try:
+                    self.client.send_audio(jid, audio_path, ptt=is_ptt)
+                except TypeError:
+                    self.client.send_audio(jid, audio_path)
+            elif hasattr(self.client, "build_audio_message"):
                 msg = self.client.build_audio_message(audio_path, ptt=is_ptt)
                 self.client.send_message(jid, msg)
-            elif hasattr(self.client, "send_audio"):
-                self.client.send_audio(jid, audio_path)
             else:
                 with open(audio_path, "rb") as f:
                     audio_bytes = f.read()

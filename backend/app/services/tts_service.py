@@ -43,7 +43,7 @@ async def generate_voice_note(
 
         if not output_path:
             import tempfile
-            fd, output_path = tempfile.mkstemp(suffix=".ogg")
+            fd, output_path = tempfile.mkstemp(suffix=".mp3")
             os.close(fd)
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)

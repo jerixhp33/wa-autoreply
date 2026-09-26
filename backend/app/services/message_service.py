@@ -282,23 +282,36 @@ async def process_incoming_message(
                     media_bytes = None
 
                 if media_bytes and mime_type:
-                    reply = await gemini_service.generate_multimodal_reply(
-                        system_prompt=bot_settings.system_prompt,
-                        conversation_history=history,
-                        user_message=content or "",
-                        media_bytes=media_bytes,
-                        mime_type=mime_type.split(';')[0].strip(),
-                        caption=caption,
-                        max_length=bot_settings.max_reply_length,
-                        language=bot_settings.language,
-                        knowledge_context=knowledge_context,
-                    )
+                    try:
+                        reply = await gemini_service.generate_multimodal_reply(
+                            system_prompt=bot_settings.system_prompt,
+                            conversation_history=history,
+                            user_message=content or "",
+                            media_bytes=media_bytes,
+                            mime_type=mime_type.split(';')[0].strip(),
+                            caption=caption,
+                            max_length=bot_settings.max_reply_length,
+                            language=bot_settings.language,
+                            knowledge_context=knowledge_context,
+                        )
+                    except Exception as mm_err:
+                        logger.warning(f"Multimodal media processing failed: {mm_err}, falling back to text prompt")
+                        fallback_prompt = "[User sent a voice note, but it could not be processed. Please reply politely asking them to repeat or send text.]" if media_type == "audio" else "[User sent an image]"
+                        reply = await gemini_service.generate_reply(
+                            system_prompt=bot_settings.system_prompt,
+                            conversation_history=history,
+                            user_message=content or fallback_prompt,
+                            max_length=bot_settings.max_reply_length,
+                            language=bot_settings.language,
+                            knowledge_context=knowledge_context,
+                        )
                 else:
                     # Fallback to text reply if media couldn't be read
+                    fallback_prompt = "[User sent a voice note. Please ask them politely to repeat or type their message.]" if media_type == "audio" else "[Media message]"
                     reply = await gemini_service.generate_reply(
                         system_prompt=bot_settings.system_prompt,
                         conversation_history=history,
-                        user_message=content or "[Media message]",
+                        user_message=content or fallback_prompt,
                         max_length=bot_settings.max_reply_length,
                         language=bot_settings.language,
                         knowledge_context=knowledge_context,
@@ -320,7 +333,14 @@ async def process_incoming_message(
                     {"conversation_id": conv.id, "error": str(e)},
                     account.user_id
                 )
-            return None
+            # If it's an audio message, provide a safe friendly fallback instead of total silence
+            if media_type == "audio":
+                reply = "I received your voice note, but couldn't process it right now. Please feel free to text your message!"
+            else:
+                return None
+
+        if not reply and media_type == "audio":
+            reply = "I'm sorry, I couldn't hear or understand the voice note clearly. Could you please send it again or type your message?"
 
         if not reply:
             logger.warning("Gemini returned empty reply")
@@ -337,7 +357,7 @@ async def process_incoming_message(
                     from app.config import settings
                     tts_dir = os.path.join(settings.media_dir, account_id, "tts")
                     os.makedirs(tts_dir, exist_ok=True)
-                    target_audio = os.path.join(tts_dir, f"voice_{uuid.uuid4().hex[:8]}.ogg")
+                    target_audio = os.path.join(tts_dir, f"voice_{uuid.uuid4().hex[:8]}.mp3")
                     voice_name = getattr(bot_settings, "voice_name", "en-IN-NeerjaNeural")
                     audio_path = await generate_voice_note(
                         text=reply,

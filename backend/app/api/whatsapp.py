@@ -247,6 +247,10 @@ async def list_accounts(
         .order_by(WhatsAppAccount.created_at.desc())
         .all()
     )
+    for a in accounts:
+        if a.status == AccountStatus.connected and not neonize_manager.is_connected(a.id):
+            a.status = AccountStatus.disconnected
+            db.commit()
     return [WhatsAppAccountResponse.model_validate(a) for a in accounts]
 
 
@@ -262,6 +266,9 @@ async def get_account(
     ).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
+    if account.status == AccountStatus.connected and not neonize_manager.is_connected(account.id):
+        account.status = AccountStatus.disconnected
+        db.commit()
     return WhatsAppAccountResponse.model_validate(account)
 
 
@@ -298,7 +305,10 @@ async def reconnect_account(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
+    await neonize_manager.stop_session(account_id)
+
     account.status = AccountStatus.connecting
+    account.qr_code = None
     db.commit()
     db.refresh(account)
 
