@@ -1,6 +1,10 @@
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 from typing import List
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -20,6 +24,20 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+
+    @model_validator(mode="after")
+    def check_security_defaults(self):
+        if self.jwt_secret == "change_this_in_production":
+            logger.warning(
+                "⚠️  SECURITY WARNING: Using default JWT_SECRET! "
+                "Set the JWT_SECRET environment variable in production."
+            )
+        if self.session_encryption_key == "change_this_32_byte_key_in_prod_":
+            logger.warning(
+                "⚠️  SECURITY WARNING: Using default SESSION_ENCRYPTION_KEY! "
+                "Set the SESSION_ENCRYPTION_KEY environment variable in production."
+            )
+        return self
 
     def get_cors_origins(self) -> List[str]:
         return [origin.strip() for origin in self.cors_origins.split(",")]

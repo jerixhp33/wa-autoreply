@@ -48,8 +48,8 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    whatsapp_accounts = relationship("WhatsAppAccount", back_populates="user")
-    api_keys = relationship("ApiKey", back_populates="user")
+    whatsapp_accounts = relationship("WhatsAppAccount", back_populates="user", cascade="all, delete-orphan")
+    api_keys = relationship("ApiKey", back_populates="user", cascade="all, delete-orphan")
 
 
 class WhatsAppAccount(Base):
@@ -66,9 +66,9 @@ class WhatsAppAccount(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     user = relationship("User", back_populates="whatsapp_accounts")
-    contacts = relationship("Contact", back_populates="whatsapp_account")
-    conversations = relationship("Conversation", back_populates="whatsapp_account")
-    bot_settings = relationship("BotSettings", back_populates="whatsapp_account", uselist=False)
+    contacts = relationship("Contact", back_populates="whatsapp_account", cascade="all, delete-orphan")
+    conversations = relationship("Conversation", back_populates="whatsapp_account", cascade="all, delete-orphan")
+    bot_settings = relationship("BotSettings", back_populates="whatsapp_account", cascade="all, delete-orphan", uselist=False)
 
 
 class Contact(Base):
@@ -83,7 +83,7 @@ class Contact(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     whatsapp_account = relationship("WhatsAppAccount", back_populates="contacts")
-    conversations = relationship("Conversation", back_populates="contact")
+    conversations = relationship("Conversation", back_populates="contact", cascade="all, delete-orphan")
 
 
 class Conversation(Base):
@@ -99,7 +99,7 @@ class Conversation(Base):
 
     whatsapp_account = relationship("WhatsAppAccount", back_populates="conversations")
     contact = relationship("Contact", back_populates="conversations")
-    messages = relationship("Message", back_populates="conversation", order_by="Message.created_at")
+    messages = relationship("Message", back_populates="conversation", order_by="Message.created_at", cascade="all, delete-orphan")
 
 
 class Message(Base):

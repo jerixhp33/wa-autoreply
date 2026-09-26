@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Bot, Save, Loader2, Settings2, Sun, Moon } from 'lucide-react';
 import { whatsappApi, botApi } from '@/lib/api';
 import { WhatsAppAccount, BotSettings } from '@/types';
@@ -37,22 +37,27 @@ export default function SettingsPage() {
     respond_to_groups: false,
   });
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await whatsappApi.listAccounts();
-        setAccounts(res.data);
-        if (res.data.length > 0) {
-          setSelectedId(res.data[0].id);
-        }
-      } catch (err) {
-        console.error('Failed to load accounts', err);
-      } finally {
-        setLoading(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadAccounts = useCallback(async () => {
+    try {
+      setLoadError(null);
+      const res = await whatsappApi.listAccounts();
+      setAccounts(res.data);
+      if (res.data.length > 0) {
+        setSelectedId(res.data[0].id);
       }
-    };
-    load();
+    } catch (err) {
+      console.error('Failed to load accounts', err);
+      setLoadError('Failed to load accounts. Please check your connection.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    loadAccounts();
+  }, [loadAccounts]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -129,7 +134,17 @@ export default function SettingsPage() {
       </div>
 
       {/* Account selector */}
-      {accounts.length === 0 ? (
+      {loadError ? (
+        <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-6 text-center">
+          <p className="text-sm font-semibold text-red-500">{loadError}</p>
+          <button
+            onClick={loadAccounts}
+            className="mt-3 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 px-4 py-1.5 text-xs font-medium transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      ) : accounts.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-8 text-center">
           <Bot className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">

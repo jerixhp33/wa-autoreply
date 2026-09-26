@@ -11,11 +11,6 @@ from app.services.auth_service import get_current_user
 router = APIRouter(tags=["dashboard"])
 
 
-@router.get("/api/health")
-async def health():
-    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
-
-
 @router.get("/api/dashboard/stats", response_model=DashboardStats)
 async def get_stats(
     current_user: User = Depends(get_current_user),

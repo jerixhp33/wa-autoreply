@@ -30,6 +30,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(JSON.parse(storedUser));
       } catch {
         localStorage.removeItem('user');
+        localStorage.removeItem('auth_token');
+        setToken(null);
       }
     }
     setLoading(false);

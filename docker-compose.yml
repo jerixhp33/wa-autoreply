@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -18,19 +16,6 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    volumes:
-      - redis_data:/data
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   backend:
     build:
       context: ./backend
@@ -38,21 +23,20 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/whatsapp_ai
-      REDIS_URL: redis://redis:6379/0
       GEMINI_API_KEY: ${GEMINI_API_KEY}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
       JWT_SECRET: ${JWT_SECRET:-change_this_in_production}
       SESSION_ENCRYPTION_KEY: ${SESSION_ENCRYPTION_KEY:-change_this_32_byte_key}
       CORS_ORIGINS: http://localhost:3000,http://frontend:3000,${CORS_ORIGINS:-}
       SESSIONS_DIR: /app/sessions
+      MEDIA_DIR: /app/media
     volumes:
       - whatsapp_sessions:/app/sessions
+      - whatsapp_media:/app/media
     ports:
       - "8000:8000"
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -105,5 +89,5 @@ services:
 
 volumes:
   postgres_data:
-  redis_data:
   whatsapp_sessions:
+  whatsapp_media:

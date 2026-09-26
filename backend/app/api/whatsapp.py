@@ -104,8 +104,9 @@ async def handle_disconnected(account_id: str):
         db.close()
 
 
-# Track recently processed message IDs to prevent duplicates
-_processed_message_ids: set = set()
+# Track recently processed message IDs to prevent duplicates (FIFO via OrderedDict)
+from collections import OrderedDict
+_processed_message_ids: OrderedDict = OrderedDict()
 _MAX_PROCESSED_IDS = 500
 
 
@@ -129,10 +130,10 @@ async def handle_message(
         if message_id in _processed_message_ids:
             logger.debug(f"Skipping duplicate message: {message_id}")
             return
-        _processed_message_ids.add(message_id)
-        # Prune to prevent memory growth
-        if len(_processed_message_ids) > _MAX_PROCESSED_IDS:
-            _processed_message_ids = set(list(_processed_message_ids)[-_MAX_PROCESSED_IDS // 2:])
+        _processed_message_ids[message_id] = True
+        # Prune oldest items deterministically
+        while len(_processed_message_ids) > _MAX_PROCESSED_IDS:
+            _processed_message_ids.popitem(last=False)
 
     async def ws_callback(event: str, data: dict, user_id: str):
         await ws_manager.send_to_user(user_id, event, data)

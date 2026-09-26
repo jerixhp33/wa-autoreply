@@ -267,14 +267,17 @@ export default function WhatsAppPage() {
   const [newName, setNewName] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [newAccountId, setNewAccountId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const { on } = useWebSocket();
 
   const loadAccounts = useCallback(async () => {
     try {
+      setLoadError(null);
       const res = await whatsappApi.listAccounts();
       setAccounts(res.data);
     } catch (err) {
       console.error('Failed to load accounts', err);
+      setLoadError('Failed to load accounts. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -363,6 +366,16 @@ export default function WhatsAppPage() {
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : loadError ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center rounded-xl border border-red-500/20 bg-red-500/5 p-6">
+          <p className="font-semibold text-red-500">{loadError}</p>
+          <button
+            onClick={loadAccounts}
+            className="mt-4 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-500 px-4 py-2 text-sm font-medium transition-colors"
+          >
+            Retry Connection
+          </button>
         </div>
       ) : accounts.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center rounded-xl border border-dashed border-border">
