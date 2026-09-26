@@ -369,29 +369,31 @@ class WhatsAppSession:
             if hasattr(self.client, "send_audio"):
                 try:
                     self.client.send_audio(jid, audio_path, ptt=is_ptt)
-                except TypeError:
-                    self.client.send_audio(jid, audio_path)
-            elif hasattr(self.client, "build_audio_message"):
-                msg = self.client.build_audio_message(audio_path, ptt=is_ptt)
-                self.client.send_message(jid, msg)
-            else:
-                with open(audio_path, "rb") as f:
-                    audio_bytes = f.read()
-                upload_res = self.client.upload(audio_bytes)
-                from neonize.proto.Neonize_pb2 import Message, AudioMessage
-                audio_msg = AudioMessage(
-                    url=upload_res.url,
-                    mimetype="audio/ogg; codecs=opus",
-                    fileSha256=upload_res.fileSha256,
-                    fileLength=len(audio_bytes),
-                    mediaKey=upload_res.mediaKey,
-                    fileEncSha256=upload_res.fileEncSha256,
-                    directPath=upload_res.directPath,
-                    ptt=is_ptt,
-                )
-                self.client.send_message(jid, Message(audioMessage=audio_msg))
+                    logger.info(f"Voice note sent to {phone} via send_audio")
+                    return True
+                except Exception as sa_err:
+                    logger.warning(f"send_audio failed: {sa_err}, attempting direct upload fallback")
 
-            logger.info(f"Voice note sent to {phone}")
+            # Fallback direct upload if send_audio failed or doesn't exist
+            with open(audio_path, "rb") as f:
+                audio_bytes = f.read()
+            upload_res = self.client.upload(audio_bytes)
+            import magic
+            from neonize.proto.Neonize_pb2 import Message, AudioMessage
+            mime = magic.from_buffer(audio_bytes, mime=True) or "audio/ogg; codecs=opus"
+            audio_msg = AudioMessage(
+                URL=getattr(upload_res, "url", getattr(upload_res, "URL", "")),
+                seconds=5,
+                directPath=getattr(upload_res, "DirectPath", getattr(upload_res, "directPath", "")),
+                fileEncSHA256=getattr(upload_res, "FileEncSHA256", getattr(upload_res, "fileEncSHA256", b"")),
+                fileLength=len(audio_bytes),
+                fileSHA256=getattr(upload_res, "FileSHA256", getattr(upload_res, "fileSHA256", b"")),
+                mediaKey=getattr(upload_res, "MediaKey", getattr(upload_res, "mediaKey", b"")),
+                mimetype=mime,
+                PTT=is_ptt,
+            )
+            self.client.send_message(jid, Message(audioMessage=audio_msg))
+            logger.info(f"Voice note sent to {phone} via manual upload fallback")
             return True
         except Exception as e:
             logger.error(f"Failed to send voice note to {phone}: {e}")

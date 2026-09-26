@@ -83,12 +83,21 @@ class GeminiService:
         now_ist = datetime.now(ist)
         current_time = now_ist.strftime('%I:%M %p IST')
         current_date = now_ist.strftime('%A, %B %d, %Y')
+        hour = now_ist.hour
+        if 5 <= hour < 12:
+            time_of_day = "Morning"
+        elif 12 <= hour < 17:
+            time_of_day = "Afternoon"
+        elif 17 <= hour < 21:
+            time_of_day = "Evening"
+        else:
+            time_of_day = "Night"
 
         # Build full system instruction
         full_system = system_prompt.strip()
         full_system = full_system.replace('{current_time}', current_time)
         full_system = full_system.replace('{current_date}', current_date)
-        full_system += f"\n\n## LIVE DATETIME\nCurrent IST Time: {current_time}\nCurrent Date: {current_date}\nAlways use this when user asks about time or date."
+        full_system += f"\n\n## LIVE DATETIME\nCurrent IST Time: {current_time} ({time_of_day})\nCurrent Date: {current_date}\nCurrent Period: {time_of_day}\nMatch greetings to {time_of_day} (e.g. do not say good night or midnight if it is daytime)."
 
         if knowledge_context:
             full_system += f"\n\n## VERIFIED BUSINESS KNOWLEDGE BASE\nUse the following official business documents to answer customer questions accurately:\n{knowledge_context}\nAnswer strictly based on this knowledge. Never invent prices, products, or policies."
@@ -199,12 +208,21 @@ class GeminiService:
         now_ist = datetime.now(ist)
         current_time = now_ist.strftime('%I:%M %p IST')
         current_date = now_ist.strftime('%A, %B %d, %Y')
+        hour = now_ist.hour
+        if 5 <= hour < 12:
+            time_of_day = "Morning"
+        elif 12 <= hour < 17:
+            time_of_day = "Afternoon"
+        elif 17 <= hour < 21:
+            time_of_day = "Evening"
+        else:
+            time_of_day = "Night"
 
         # Build full system instruction
         full_system = system_prompt.strip()
         full_system = full_system.replace('{current_time}', current_time)
         full_system = full_system.replace('{current_date}', current_date)
-        full_system += f"\n\n## LIVE DATETIME\nCurrent IST Time: {current_time}\nCurrent Date: {current_date}\nAlways use this when user asks about time or date."
+        full_system += f"\n\n## LIVE DATETIME\nCurrent IST Time: {current_time} ({time_of_day})\nCurrent Date: {current_date}\nCurrent Period: {time_of_day}\nMatch greetings to {time_of_day} (e.g. do not say good night or midnight if it is daytime)."
 
         if knowledge_context:
             full_system += f"\n\n## VERIFIED BUSINESS KNOWLEDGE BASE\nUse the following official business documents to answer customer questions accurately:\n{knowledge_context}\nAnswer strictly based on this knowledge. Never invent prices, products, or policies."

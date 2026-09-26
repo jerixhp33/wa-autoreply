@@ -29,6 +29,7 @@ def create_tables():
         ("messages", "media_mime_type", "VARCHAR"),
         ("messages", "media_caption", "TEXT"),
         ("messages", "transcription", "TEXT"),
+        ("whatsapp_accounts", "session_data", "BYTEA"),
     ]
     with engine.connect() as conn:
         for table, col, col_type in columns:

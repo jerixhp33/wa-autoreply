@@ -66,6 +66,18 @@ async def handle_connected(account_id: str, phone_number: str):
             account.qr_code = None
             if phone_number:
                 account.phone_number = phone_number
+
+            # Backup session SQLite database file to PostgreSQL
+            session_path = get_session_path(account_id)
+            session_db = session_path + ".db"
+            if os.path.exists(session_db):
+                try:
+                    with open(session_db, "rb") as f:
+                        account.session_data = f.read()
+                    logger.info(f"Backed up WhatsApp session to PostgreSQL for account {account_id} ({len(account.session_data)} bytes)")
+                except Exception as bkp_err:
+                    logger.warning(f"Could not backup session DB: {bkp_err}")
+
             db.commit()
             await ws_manager.send_to_user(
                 account.user_id,
@@ -177,6 +189,23 @@ async def handle_message(
 async def start_whatsapp_session(account_id: str):
     """Start a WhatsApp session in background."""
     session_path = get_session_path(account_id)
+    session_db = session_path + ".db"
+
+    # Restore session database from PostgreSQL if not present on disk
+    if not os.path.exists(session_db):
+        from app.database.database import SessionLocal
+        db = SessionLocal()
+        try:
+            account = db.query(WhatsAppAccount).filter(WhatsAppAccount.id == account_id).first()
+            if account and account.session_data:
+                os.makedirs(os.path.dirname(session_db), exist_ok=True)
+                with open(session_db, "wb") as f:
+                    f.write(account.session_data)
+                logger.info(f"Restored WhatsApp session database from PostgreSQL for account {account_id} ({len(account.session_data)} bytes)")
+        except Exception as rst_err:
+            logger.error(f"Failed to restore session DB: {rst_err}")
+        finally:
+            db.close()
 
     neonize_manager.register_callbacks(
         account_id=account_id,

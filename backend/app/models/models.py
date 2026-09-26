@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Column, String, Integer, Boolean, DateTime, Text, ForeignKey, Enum
+    Column, String, Integer, Boolean, DateTime, Text, ForeignKey, Enum, LargeBinary
 )
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.sql import func
@@ -62,6 +62,7 @@ class WhatsAppAccount(Base):
     session_path = Column(String, nullable=True)
     status = Column(String, default=AccountStatus.disconnected)
     qr_code = Column(Text, nullable=True)
+    session_data = Column(LargeBinary, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

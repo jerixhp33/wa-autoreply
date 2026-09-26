@@ -37,6 +37,17 @@ async def auto_reconnect_sessions():
         for account in accounts:
             session_path = get_session_path(account.id)
             session_db = session_path + ".db"
+
+            # Restore from PostgreSQL if missing on disk
+            if not os.path.exists(session_db) and getattr(account, "session_data", None):
+                try:
+                    os.makedirs(os.path.dirname(session_db), exist_ok=True)
+                    with open(session_db, "wb") as f:
+                        f.write(account.session_data)
+                    logger.info(f"Restored session database from PostgreSQL for account {account.id}")
+                except Exception as rst_err:
+                    logger.warning(f"Could not restore session DB: {rst_err}")
+
             if os.path.exists(session_db):
                 logger.info(f"Auto-resuming session for account {account.id} ({account.name})...")
                 asyncio.create_task(start_whatsapp_session(account.id))
