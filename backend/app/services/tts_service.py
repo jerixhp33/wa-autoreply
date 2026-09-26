@@ -24,6 +24,13 @@ VOICE_CATALOG = {
 }
 
 
+PLAYAI_FALLBACK_MAP = {
+    "Aria-PlayAI": "ta-IN-PallaviNeural",
+    "Fritz-PlayAI": "ta-IN-ValluvarNeural",
+    "Dexter-PlayAI": "en-IN-PrabhatNeural",
+}
+
+
 async def generate_voice_note(
     text: str,
     voice_name: Optional[str] = None,
@@ -32,42 +39,48 @@ async def generate_voice_note(
 ) -> Optional[str]:
     """
     Generate an audio voice note from text.
-    Uses Groq PlayAI TTS if configured/selected, with automatic fallback to Edge-TTS.
+    Uses Microsoft Edge-TTS natural neural voices for high fidelity Tamil, English, and Hindi.
     Always produces WhatsApp-compliant 16kHz mono OGG Opus.
     """
     if not text or not text.strip():
         return None
 
-    voice = voice_name if voice_name in VOICE_CATALOG else DEFAULT_VOICE
+    import re
+    # Remove URLs
+    clean_text = re.sub(r'https?://\S+|www\.\S+', '', text)
+    # Remove markdown symbols
+    clean_text = re.sub(r'[*_~`#\[\]]', '', clean_text)
+    # Remove emojis so TTS speaks pure natural language rather than reading out emoji names
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F680-\U0001F6FF"  # transport & map symbols
+        "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+        "\U00002702-\U000027B0"
+        "\U000024C2-\U0001F251"
+        "\U0001F900-\U0001F9FF"  # supplemental symbols
+        "\U0001FA70-\U0001FAFF"  # symbols and pictographs extended-a
+        "]+", flags=re.UNICODE
+    )
+    clean_text = emoji_pattern.sub('', clean_text)
+    clean_text = re.sub(r'\s+', ' ', clean_text).strip()
 
-    # 1. Try Groq PlayAI TTS if requested or if Groq API key is present with a PlayAI voice
-    if voice.endswith("-PlayAI") or (groq_api_key and "PlayAI" in voice):
-        try:
-            from app.services.groq_service import generate_speech_groq
-            groq_voice = voice.replace("-PlayAI", "")
-            if not groq_voice.endswith("-PlayAI") and groq_voice not in ("Aria", "Dexter"):
-                groq_voice = f"{groq_voice}-PlayAI"
-            groq_result = await generate_speech_groq(
-                text=text,
-                voice=groq_voice,
-                groq_api_key=groq_api_key,
-                output_path=output_path,
-            )
-            if groq_result and os.path.exists(groq_result) and os.path.getsize(groq_result) > 0:
-                logger.info(f"Generated voice note with Groq TTS: {groq_result}")
-                return groq_result
-            else:
-                logger.warning("Groq TTS did not return valid audio, falling back to Edge-TTS")
-        except Exception as groq_err:
-            logger.warning(f"Groq TTS failed: {groq_err}, falling back to Edge-TTS")
+    if not clean_text:
+        logger.info("Text contains only emojis/links; skipping voice note generation")
+        return None
 
-    # If voice was a PlayAI voice but Groq failed or wasn't configured, fallback to default Edge voice
-    edge_voice = voice if not voice.endswith("-PlayAI") else DEFAULT_VOICE
-
-    # Clean text of markdown asterisks, URLs, and code blocks for clean speech
-    clean_text = text.replace("*", "").replace("#", "").replace("_", "").replace("`", "").strip()
     if len(clean_text) > 800:
         clean_text = clean_text[:800]  # Cap length for voice note
+
+    # Resolve voice: map legacy PlayAI voices to their natural neural counterparts
+    voice = voice_name or DEFAULT_VOICE
+    if voice in PLAYAI_FALLBACK_MAP:
+        voice = PLAYAI_FALLBACK_MAP[voice]
+    elif voice not in VOICE_CATALOG or voice.endswith("-PlayAI"):
+        voice = DEFAULT_VOICE
+
+    edge_voice = voice
 
     try:
         import edge_tts

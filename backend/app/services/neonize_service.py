@@ -483,6 +483,7 @@ class NeonizeManager:
         self.sessions: Dict[str, WhatsAppSession] = {}
         self._callbacks: Dict[str, Dict[str, Callable]] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._start_lock = asyncio.Lock()
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
         if self._loop is None:
@@ -509,31 +510,34 @@ class NeonizeManager:
         }
 
     async def start_session(self, account_id: str, session_name: str) -> WhatsAppSession:
-        """Start a WhatsApp session for an account."""
-        # Stop existing session if any without blocking the event loop
-        if account_id in self.sessions:
-            existing = self.sessions[account_id]
-            if existing.connected:
-                return existing
-            await asyncio.get_event_loop().run_in_executor(None, existing.stop)
-            self.sessions.pop(account_id, None)
+        """Start a WhatsApp session for an account (serialized to protect Go C-FFI runtime)."""
+        async with self._start_lock:
+            # Stop existing session if any without blocking the event loop
+            if account_id in self.sessions:
+                existing = self.sessions[account_id]
+                if existing.connected:
+                    return existing
+                await asyncio.get_event_loop().run_in_executor(None, existing.stop)
+                self.sessions.pop(account_id, None)
 
-        callbacks = self._callbacks.get(account_id, {})
-        loop = asyncio.get_running_loop()
+            callbacks = self._callbacks.get(account_id, {})
+            loop = asyncio.get_running_loop()
 
-        session = WhatsAppSession(
-            account_id=account_id,
-            session_name=session_name,
-            on_qr=callbacks.get("on_qr", self._noop),
-            on_connected=callbacks.get("on_connected", self._noop),
-            on_disconnected=callbacks.get("on_disconnected", self._noop),
-            on_message=callbacks.get("on_message", self._noop),
-            loop=loop,
-        )
+            session = WhatsAppSession(
+                account_id=account_id,
+                session_name=session_name,
+                on_qr=callbacks.get("on_qr", self._noop),
+                on_connected=callbacks.get("on_connected", self._noop),
+                on_disconnected=callbacks.get("on_disconnected", self._noop),
+                on_message=callbacks.get("on_message", self._noop),
+                loop=loop,
+            )
 
-        self.sessions[account_id] = session
-        session.start()
-        return session
+            self.sessions[account_id] = session
+            session.start()
+            # Stagger startup so Go runtime registers client in its global map safely
+            await asyncio.sleep(3)
+            return session
 
     async def stop_session(self, account_id: str):
         """Stop a WhatsApp session."""

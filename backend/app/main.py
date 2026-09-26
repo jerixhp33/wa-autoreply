@@ -31,8 +31,9 @@ async def auto_reconnect_sessions():
 
     db = SessionLocal()
     try:
+        # Only auto-reconnect accounts that were legitimately in connected status
         accounts = db.query(WhatsAppAccount).filter(
-            WhatsAppAccount.status.in_([AccountStatus.connected, AccountStatus.connecting])
+            WhatsAppAccount.status == AccountStatus.connected
         ).all()
         for account in accounts:
             session_path = get_session_path(account.id)
@@ -52,7 +53,12 @@ async def auto_reconnect_sessions():
 
             if os.path.exists(session_db) or os.path.exists(session_path):
                 logger.info(f"Auto-resuming session for account {account.id} ({account.name})...")
-                asyncio.create_task(start_whatsapp_session(account.id))
+                try:
+                    await start_whatsapp_session(account.id)
+                    # Stagger sequential reconnects to eliminate Go C-FFI concurrent map write panics
+                    await asyncio.sleep(4)
+                except Exception as resume_err:
+                    logger.error(f"Failed to auto-resume account {account.id}: {resume_err}")
             else:
                 logger.info(f"No existing session database for account {account.id}, marking disconnected")
                 account.status = AccountStatus.disconnected
