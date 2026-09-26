@@ -380,7 +380,7 @@ class WhatsAppSession:
             upload_res = self.client.upload(audio_bytes)
             import magic
             from neonize.proto.Neonize_pb2 import Message, AudioMessage
-            mime = magic.from_buffer(audio_bytes, mime=True) or "audio/ogg; codecs=opus"
+            mime = "audio/ogg; codecs=opus" if is_ptt else (magic.from_buffer(audio_bytes, mime=True) or "audio/ogg")
             audio_msg = AudioMessage(
                 URL=getattr(upload_res, "url", getattr(upload_res, "URL", "")),
                 seconds=5,

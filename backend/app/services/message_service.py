@@ -357,7 +357,7 @@ async def process_incoming_message(
                     from app.config import settings
                     tts_dir = os.path.join(settings.media_dir, account_id, "tts")
                     os.makedirs(tts_dir, exist_ok=True)
-                    target_audio = os.path.join(tts_dir, f"voice_{uuid.uuid4().hex[:8]}.mp3")
+                    target_audio = os.path.join(tts_dir, f"voice_{uuid.uuid4().hex[:8]}.ogg")
                     voice_name = getattr(bot_settings, "voice_name", "en-IN-NeerjaNeural")
                     audio_path = await generate_voice_note(
                         text=reply,
