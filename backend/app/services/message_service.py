@@ -290,10 +290,25 @@ async def process_incoming_message(
                 except Exception as t_err:
                     logger.warning(f"Voice transcription attempt failed: {t_err}")
 
+            # Determine if voice reply will be sent
+            voice_active = getattr(bot_settings, "voice_reply_enabled", False) and (
+                media_type == "audio" or getattr(bot_settings, "voice_reply_mode", "audio_only") == "always"
+            )
+            effective_system_prompt = bot_settings.system_prompt
+            if voice_active:
+                effective_system_prompt += (
+                    "\n\n## 🎙️ VOICE NOTE SPEECH GUIDELINES\n"
+                    "- This response will be synthesized and sent as a WhatsApp voice note.\n"
+                    "- Match the user's language strictly: If the user spoke English, reply in natural, smooth, conversational English. If the user spoke Tamil, reply in Tamil. Never use awkward robotic phonetics.\n"
+                    "- Speak like a real human friend talking naturally. Keep sentences flowing smoothly, relaxed, and easy to understand.\n"
+                    "- Do NOT announce the clock time or say 'the time is ...' unless the user explicitly asked for the time.\n"
+                    "- Do NOT use markdown asterisks (*), hashtags, bullet points, or list numbering."
+                )
+
             if transcribed_audio_text:
                 # Transcribed cleanly! Use standard text prompt with the actual words spoken
                 reply = await gemini_service.generate_reply(
-                    system_prompt=bot_settings.system_prompt,
+                    system_prompt=effective_system_prompt,
                     conversation_history=history,
                     user_message=transcribed_audio_text,
                     max_length=bot_settings.max_reply_length,
@@ -313,7 +328,7 @@ async def process_incoming_message(
                 if media_bytes and mime_type:
                     try:
                         reply = await gemini_service.generate_multimodal_reply(
-                            system_prompt=bot_settings.system_prompt,
+                            system_prompt=effective_system_prompt,
                             conversation_history=history,
                             user_message=content or "",
                             media_bytes=media_bytes,
@@ -327,7 +342,7 @@ async def process_incoming_message(
                         logger.warning(f"Multimodal media processing failed: {mm_err}, falling back to text prompt")
                         fallback_prompt = "[User sent a voice note, but it could not be processed. Please reply politely asking them to repeat or send text.]" if media_type == "audio" else "[User sent an image]"
                         reply = await gemini_service.generate_reply(
-                            system_prompt=bot_settings.system_prompt,
+                            system_prompt=effective_system_prompt,
                             conversation_history=history,
                             user_message=content or fallback_prompt,
                             max_length=bot_settings.max_reply_length,
@@ -338,7 +353,7 @@ async def process_incoming_message(
                     # Fallback to text reply if media couldn't be read
                     fallback_prompt = "[User sent a voice note. Please ask them politely to repeat or type their message.]" if media_type == "audio" else "[Media message]"
                     reply = await gemini_service.generate_reply(
-                        system_prompt=bot_settings.system_prompt,
+                        system_prompt=effective_system_prompt,
                         conversation_history=history,
                         user_message=content or fallback_prompt,
                         max_length=bot_settings.max_reply_length,
@@ -347,7 +362,7 @@ async def process_incoming_message(
                     )
             else:
                 reply = await gemini_service.generate_reply(
-                    system_prompt=bot_settings.system_prompt,
+                    system_prompt=effective_system_prompt,
                     conversation_history=history,
                     user_message=content,
                     max_length=bot_settings.max_reply_length,

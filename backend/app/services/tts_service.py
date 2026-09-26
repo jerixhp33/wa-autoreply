@@ -25,8 +25,8 @@ VOICE_CATALOG = {
 
 
 PLAYAI_FALLBACK_MAP = {
-    "Aria-PlayAI": "ta-IN-PallaviNeural",
-    "Fritz-PlayAI": "ta-IN-ValluvarNeural",
+    "Aria-PlayAI": "en-IN-NeerjaNeural",
+    "Fritz-PlayAI": "en-IN-PrabhatNeural",
     "Dexter-PlayAI": "en-IN-PrabhatNeural",
 }
 
@@ -40,7 +40,7 @@ async def generate_voice_note(
     """
     Generate an audio voice note from text.
     Uses Microsoft Edge-TTS natural neural voices for high fidelity Tamil, English, and Hindi.
-    Always produces WhatsApp-compliant 16kHz mono OGG Opus.
+    Always produces WhatsApp-compliant 24kHz HD mono OGG Opus.
     """
     if not text or not text.strip():
         return None
@@ -48,8 +48,12 @@ async def generate_voice_note(
     import re
     # Remove URLs
     clean_text = re.sub(r'https?://\S+|www\.\S+', '', text)
-    # Remove markdown symbols
-    clean_text = re.sub(r'[*_~`#\[\]]', '', clean_text)
+    # Remove markdown symbols and brackets
+    clean_text = re.sub(r'[*_~`#\[\]()]', '', clean_text)
+    # Clean repeated punctuation
+    clean_text = re.sub(r'!{2,}', '!', clean_text)
+    clean_text = re.sub(r'\?{2,}', '?', clean_text)
+    clean_text = re.sub(r'\.{2,}', '.', clean_text)
     # Remove emojis so TTS speaks pure natural language rather than reading out emoji names
     emoji_pattern = re.compile(
         "["
@@ -73,14 +77,26 @@ async def generate_voice_note(
     if len(clean_text) > 800:
         clean_text = clean_text[:800]  # Cap length for voice note
 
-    # Resolve voice: map legacy PlayAI voices to their natural neural counterparts
-    voice = voice_name or DEFAULT_VOICE
-    if voice in PLAYAI_FALLBACK_MAP:
-        voice = PLAYAI_FALLBACK_MAP[voice]
-    elif voice not in VOICE_CATALOG or voice.endswith("-PlayAI"):
-        voice = DEFAULT_VOICE
-
-    edge_voice = voice
+    # Smart voice selection based on script:
+    # If text is written in Tamil script, use native Tamil neural voices for authentic Tamil speech.
+    # If text is in Latin/English letters, use Indian English or US English neural voice for crystal clear pronunciation.
+    has_tamil = bool(re.search(r'[\u0B80-\u0BFF]', clean_text))
+    if has_tamil:
+        if voice_name and "Valluvar" in str(voice_name):
+            edge_voice = "ta-IN-ValluvarNeural"
+        else:
+            edge_voice = "ta-IN-PallaviNeural"
+    else:
+        # Latin / English script
+        v = voice_name or DEFAULT_VOICE
+        if v in PLAYAI_FALLBACK_MAP:
+            v = PLAYAI_FALLBACK_MAP[v]
+        if v in ("en-IN-PrabhatNeural", "ta-IN-ValluvarNeural"):
+            edge_voice = "en-IN-PrabhatNeural"
+        elif v in ("en-US-JennyNeural", "en-US-GuyNeural"):
+            edge_voice = v
+        else:
+            edge_voice = "en-IN-NeerjaNeural"
 
     try:
         import edge_tts
@@ -97,14 +113,15 @@ async def generate_voice_note(
         fd, temp_mp3 = tempfile.mkstemp(suffix=".mp3")
         os.close(fd)
 
-        communicate = edge_tts.Communicate(clean_text, edge_voice)
+        # -3% rate creates a natural, relaxed, conversational cadence
+        communicate = edge_tts.Communicate(clean_text, edge_voice, rate="-3%")
         await communicate.save(temp_mp3)
 
         if not os.path.exists(temp_mp3) or os.path.getsize(temp_mp3) == 0:
             logger.warning("TTS generated empty MP3 file")
             return None
 
-        # Convert to WhatsApp PTT compliant OGG Opus (mono, 16kHz, libopus)
+        # Convert to WhatsApp PTT compliant 24kHz HD OGG Opus (mono, 64kbps, wideband)
         ffmpeg_bin = shutil.which("ffmpeg")
         if ffmpeg_bin:
             proc = await asyncio.create_subprocess_exec(
@@ -112,10 +129,9 @@ async def generate_voice_note(
                 "-y",
                 "-i", temp_mp3,
                 "-c:a", "libopus",
-                "-b:a", "32k",
+                "-b:a", "64k",
                 "-ac", "1",
-                "-ar", "16000",
-                "-application", "voip",
+                "-ar", "24000",
                 output_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -125,7 +141,7 @@ async def generate_voice_note(
                 logger.warning(f"ffmpeg conversion failed ({proc.returncode}): {stderr.decode(errors='ignore')}, using MP3 fallback")
                 shutil.copy(temp_mp3, output_path)
             else:
-                logger.info(f"Converted TTS to WhatsApp PTT Opus: {output_path} ({os.path.getsize(output_path)} bytes)")
+                logger.info(f"Converted TTS to WhatsApp PTT Opus HD: {output_path} ({os.path.getsize(output_path)} bytes)")
         else:
             logger.warning("ffmpeg not found, using raw MP3 as fallback")
             shutil.copy(temp_mp3, output_path)
