@@ -85,6 +85,7 @@ class GeminiService:
         language: str = "automatic",
         knowledge_context: Optional[str] = None,
         is_voice_output: bool = False,
+        enable_web_search: bool = True,
     ) -> Optional[str]:
         """
         Generate an AI reply.
@@ -148,10 +149,20 @@ class GeminiService:
                 "<The reply text shown on the WhatsApp chat screen. Can use casual Tanglish or English, line breaks, and aesthetic emojis.>\n"
                 "---SPEECH---\n"
                 "<The exact words to be spoken in the audio voice note. Follow these strict speech rules:\n"
-                "1. If the message is in Tamil or Tanglish, write this SPEECH section in fluent spoken TAMIL SCRIPT (தமிழ் எழுத்துக்கள்) so the native Tamil voice synthesizer pronounces every word smoothly and authentically (e.g. 'வணக்கம்! எப்படி இருக்கீங்க? சொல்லுங்க, நான் உங்களுக்கு எப்படி ஹெல்ப் பண்ணட்டும்?'). Transliterate common everyday loanwords into Tamil script (e.g. 'ஹெல்ப்', 'வாட்ஸ்அப்', 'மெசேஜ்', 'கண்டிப்பா'). NEVER use English Latin letters for Tamil words in the speech track.\n"
-                "2. If the message is in English, write in natural, conversational English.\n"
-                "3. Use spoken colloquial Tamil (பேச்சுத் தமிழ்) instead of bookish written Tamil.\n"
-                "4. ZERO emojis, ZERO asterisks (*), ZERO bullet points, ZERO unprompted clock announcements. Use natural commas and periods for breath pauses.>"
+                "1. If the message is in Tamil or Tanglish, write this SPEECH section in fluent spoken TAMIL SCRIPT (தமிழ் எழுத்துக்கள்) so the native Tamil voice synthesizer pronounces every word smoothly and authentically (e.g. 'வணக்கம்! எப்படி இருக்கீங்க? சொல்லுங்க, நான் உங்களுக்கு எப்படி ஹெல்ப் பண்ணட்டும்?'). NEVER use English Latin letters for Tamil words in the speech track.\n"
+                "2. ALWAYS use natural spoken colloquial Tamil (பேச்சுத் தமிழ்). NEVER write formal or literary written Tamil (எழுத்துத் தமிழ்), which sounds stiff and robotic on TTS:\n"
+                "   * Use 'பண்றேன்' (NEVER 'செய்கிறேன்') | 'பண்ணுங்க' (NEVER 'செய்யுங்கள்')\n"
+                "   * Use 'வர்றேன்' (NEVER 'வருகிறேன்') | 'வாடா / வாங்க' (NEVER 'வாருங்கள்')\n"
+                "   * Use 'போறேன்' (NEVER 'செல்கிறேன்') | 'போங்க' (NEVER 'செல்லுங்கள்')\n"
+                "   * Use 'இருக்கீங்க' (NEVER 'இருக்கிறீர்கள்') | 'இருக்கேன்' (NEVER 'இருக்கிறேன்')\n"
+                "   * Use 'சாப்டியா?' (NEVER 'சாப்பிட்டாயா?') | 'சாப்பிட்டேன்' (NEVER 'உணவு உண்டேன்')\n"
+                "   * Use 'சொல்லுங்க' (NEVER 'கூறுங்கள்') | 'கேளுங்க' (NEVER 'கேளுங்கள்')\n"
+                "   * Use 'புரியுது' (NEVER 'புரிகிறது') | 'தெரியும்' (NEVER 'தெரியவருகிறது')\n"
+                "   * Use 'கண்டிப்பா' (NEVER 'நிச்சயமாக') | 'ரொம்ப' (NEVER 'மிகவும்')\n"
+                "   * Use 'எப்படி இருக்கீங்க?' (NEVER 'எவ்வாறு உள்ளீர்கள்?')\n"
+                "3. Transliterate common English loanwords into Tamil script phonetically so the native voice pronounces them naturally ('ஹெல்ப்', 'வாட்ஸ்அப்', 'மெசேஜ்', 'ஆபீஸ்', 'டைம்', 'காபி', 'பிசி', 'ரிலாக்ஸ்', 'சூப்பர்').\n"
+                "4. If the message is in English, write in natural, conversational English.\n"
+                "5. ZERO emojis, ZERO asterisks (*), ZERO bullet points, ZERO unprompted clock announcements. Use natural commas and periods for breath pauses.>"
             )
 
         # Build content list from conversation history
@@ -178,8 +189,17 @@ class GeminiService:
             )
         )
 
+        # Google Search Grounding tools when enabled
+        tools = None
+        if enable_web_search:
+            try:
+                tools = [types.Tool(google_search=types.GoogleSearch())]
+            except Exception as tool_err:
+                logger.debug(f"Google search tool init note: {tool_err}")
+
         config = types.GenerateContentConfig(
             system_instruction=full_system,
+            tools=tools,
             max_output_tokens=min(1024, max_length * 2 if max_length else 1024),
             temperature=0.7,
         )
@@ -241,6 +261,7 @@ class GeminiService:
         language: str = "automatic",
         knowledge_context: Optional[str] = None,
         is_voice_output: bool = False,
+        enable_web_search: bool = True,
     ) -> Optional[str]:
         """
         Generate an AI reply for multimodal inputs (images, audio).
@@ -291,10 +312,20 @@ class GeminiService:
                 "<The reply text shown on the WhatsApp chat screen. Can use casual Tanglish or English, line breaks, and aesthetic emojis.>\n"
                 "---SPEECH---\n"
                 "<The exact words to be spoken in the audio voice note. Follow these strict speech rules:\n"
-                "1. If the message is in Tamil or Tanglish, write this SPEECH section in fluent spoken TAMIL SCRIPT (தமிழ் எழுத்துக்கள்) so the native Tamil voice synthesizer pronounces every word smoothly and authentically (e.g. 'வணக்கம்! எப்படி இருக்கீங்க? சொல்லுங்க, நான் உங்களுக்கு எப்படி ஹெல்ப் பண்ணட்டும்?'). Transliterate common everyday loanwords into Tamil script (e.g. 'ஹெல்ப்', 'வாட்ஸ்அப்', 'மெசேஜ்', 'கண்டிப்பா'). NEVER use English Latin letters for Tamil words in the speech track.\n"
-                "2. If the message is in English, write in natural, conversational English.\n"
-                "3. Use spoken colloquial Tamil (பேச்சுத் தமிழ்) instead of bookish written Tamil.\n"
-                "4. ZERO emojis, ZERO asterisks (*), ZERO bullet points, ZERO unprompted clock announcements. Use natural commas and periods for breath pauses.>"
+                "1. If the message is in Tamil or Tanglish, write this SPEECH section in fluent spoken TAMIL SCRIPT (தமிழ் எழுத்துக்கள்) so the native Tamil voice synthesizer pronounces every word smoothly and authentically (e.g. 'வணக்கம்! எப்படி இருக்கீங்க? சொல்லுங்க, நான் உங்களுக்கு எப்படி ஹெல்ப் பண்ணட்டும்?'). NEVER use English Latin letters for Tamil words in the speech track.\n"
+                "2. ALWAYS use natural spoken colloquial Tamil (பேச்சுத் தமிழ்). NEVER write formal or literary written Tamil (எழுத்துத் தமிழ்), which sounds stiff and robotic on TTS:\n"
+                "   * Use 'பண்றேன்' (NEVER 'செய்கிறேன்') | 'பண்ணுங்க' (NEVER 'செய்யுங்கள்')\n"
+                "   * Use 'வர்றேன்' (NEVER 'வருகிறேன்') | 'வாடா / வாங்க' (NEVER 'வாருங்கள்')\n"
+                "   * Use 'போறேன்' (NEVER 'செல்கிறேன்') | 'போங்க' (NEVER 'செல்லுங்கள்')\n"
+                "   * Use 'இருக்கீங்க' (NEVER 'இருக்கிறீர்கள்') | 'இருக்கேன்' (NEVER 'இருக்கிறேன்')\n"
+                "   * Use 'சாப்டியா?' (NEVER 'சாப்பிட்டாயா?') | 'சாப்பிட்டேன்' (NEVER 'உணவு உண்டேன்')\n"
+                "   * Use 'சொல்லுங்க' (NEVER 'கூறுங்கள்') | 'கேளுங்க' (NEVER 'கேளுங்கள்')\n"
+                "   * Use 'புரியுது' (NEVER 'புரிகிறது') | 'தெரியும்' (NEVER 'தெரியவருகிறது')\n"
+                "   * Use 'கண்டிப்பா' (NEVER 'நிச்சயமாக') | 'ரொம்ப' (NEVER 'மிகவும்')\n"
+                "   * Use 'எப்படி இருக்கீங்க?' (NEVER 'எவ்வாறு உள்ளீர்கள்?')\n"
+                "3. Transliterate common English loanwords into Tamil script phonetically so the native voice pronounces them naturally ('ஹெல்ப்', 'வாட்ஸ்அப்', 'மெசேஜ்', 'ஆபீஸ்', 'டைம்', 'காபி', 'பிசி', 'ரிலாக்ஸ்', 'சூப்பர்').\n"
+                "4. If the message is in English, write in natural, conversational English.\n"
+                "5. ZERO emojis, ZERO asterisks (*), ZERO bullet points, ZERO unprompted clock announcements. Use natural commas and periods for breath pauses.>"
             )
 
         # Build content list from conversation history
@@ -334,8 +365,16 @@ class GeminiService:
             )
         )
 
+        tools = None
+        if enable_web_search:
+            try:
+                tools = [types.Tool(google_search=types.GoogleSearch())]
+            except Exception as tool_err:
+                logger.debug(f"Google search tool init note: {tool_err}")
+
         config = types.GenerateContentConfig(
             system_instruction=full_system,
+            tools=tools,
             max_output_tokens=min(1024, max_length * 2 if max_length else 1024),
             temperature=0.7,
         )

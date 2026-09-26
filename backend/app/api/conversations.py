@@ -1,6 +1,8 @@
+import os
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 
 from app.database.database import get_db
@@ -196,3 +198,42 @@ async def update_conversation(
 
     db.commit()
     return {"id": conv.id, "ai_enabled": conv.ai_enabled, "human_takeover": conv.human_takeover}
+
+
+@router.get("/messages/{message_id}/media")
+async def get_message_media(
+    message_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Stream media (audio voice note, image, sticker) directly for browser playback.
+    Accessible without requiring bearer token in query parameter for native <audio> and <img> tags.
+    """
+    msg = db.query(Message).filter(Message.id == message_id).first()
+    if not msg or not msg.media_path:
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    if not os.path.exists(msg.media_path):
+        raise HTTPException(status_code=404, detail="Media file not found on disk")
+
+    mime = msg.media_mime_type
+    if not mime:
+        ext = os.path.splitext(msg.media_path)[1].lower()
+        if ext in (".ogg", ".opus"):
+            mime = "audio/ogg; codecs=opus"
+        elif ext == ".mp3":
+            mime = "audio/mpeg"
+        elif ext == ".webp":
+            mime = "image/webp"
+        elif ext in (".jpg", ".jpeg"):
+            mime = "image/jpeg"
+        elif ext == ".png":
+            mime = "image/png"
+        else:
+            mime = "application/octet-stream"
+
+    return FileResponse(
+        path=msg.media_path,
+        media_type=mime,
+        filename=os.path.basename(msg.media_path),
+    )

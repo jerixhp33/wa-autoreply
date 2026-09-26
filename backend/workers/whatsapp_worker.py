@@ -134,8 +134,15 @@ async def on_message(
     if res:
         reply_text = res.get("reply") if isinstance(res, dict) else res
         audio_path = res.get("audio_path") if isinstance(res, dict) else None
+        sticker_path = res.get("sticker_path") if isinstance(res, dict) else None
 
-        if audio_path:
+        if sticker_path:
+            try:
+                await neonize_manager.send_sticker(account_id, sender, sticker_path)
+                logger.info(f"AI sticker sent to {sender}")
+            except Exception as e:
+                logger.error(f"Failed to send sticker to {sender}: {e}")
+        elif audio_path:
             try:
                 await neonize_manager.send_audio(account_id, sender, audio_path, is_ptt=True)
                 logger.info(f"AI voice note sent to {sender}")

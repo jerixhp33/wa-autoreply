@@ -269,8 +269,52 @@ async def process_incoming_message(
         from app.services.tts_service import generate_voice_note
         knowledge_context = get_active_knowledge_context(db, account_id)
 
+        # Check if user requested a sticker from an image
+        stickers_enabled = getattr(bot_settings, "stickers_enabled", True)
+        if stickers_enabled and media_type == "image" and media_path:
+            text_trigger = (caption or content or "").strip().lower()
+            is_sticker_req = any(kw in text_trigger for kw in [
+                "sticker", "stiker", "!sticker", "/sticker", "#sticker",
+                "ஸ்டிக்கர்", "make sticker", "convert sticker"
+            ])
+            if is_sticker_req:
+                logger.info(f"Sticker conversion requested for image {media_path}")
+                ai_msg = save_message(
+                    db=db,
+                    conversation_id=conv.id,
+                    content="[Sticker]",
+                    direction=MessageDirection.outgoing,
+                    ai_generated=True,
+                    status=MessageStatus.pending,
+                    message_type="sticker",
+                    media_path=media_path,
+                )
+                if ws_callback:
+                    await ws_callback(
+                        "ai_reply_completed",
+                        {
+                            "id": ai_msg.id,
+                            "conversation_id": conv.id,
+                            "account_id": account_id,
+                            "content": "[Sticker]",
+                            "ai_generated": True,
+                            "direction": "outgoing",
+                            "message_type": "sticker",
+                            "created_at": ai_msg.created_at.isoformat(),
+                        },
+                        account.user_id,
+                    )
+                return {
+                    "reply": "[Sticker]",
+                    "sticker_path": media_path,
+                    "conversation_id": conv.id,
+                    "message_id": ai_msg.id,
+                }
+
         # Generate AI reply
         try:
+            enable_web_search = getattr(bot_settings, "web_search_enabled", True)
+
             # 1. If incoming message is audio, first try high-speed Groq Whisper transcription
             transcribed_audio_text = None
             if media_type == "audio" and media_path:
@@ -315,6 +359,7 @@ async def process_incoming_message(
                     language=bot_settings.language,
                     knowledge_context=knowledge_context,
                     is_voice_output=voice_active,
+                    enable_web_search=enable_web_search,
                 )
             elif media_path and media_type in ("image", "audio"):
                 # Read media bytes for multimodal AI processing
@@ -339,6 +384,7 @@ async def process_incoming_message(
                             language=bot_settings.language,
                             knowledge_context=knowledge_context,
                             is_voice_output=voice_active,
+                            enable_web_search=enable_web_search,
                         )
                     except Exception as mm_err:
                         logger.warning(f"Multimodal media processing failed: {mm_err}, falling back to text prompt")
@@ -351,6 +397,7 @@ async def process_incoming_message(
                             language=bot_settings.language,
                             knowledge_context=knowledge_context,
                             is_voice_output=voice_active,
+                            enable_web_search=enable_web_search,
                         )
                 else:
                     # Fallback to text reply if media couldn't be read
@@ -363,6 +410,7 @@ async def process_incoming_message(
                         language=bot_settings.language,
                         knowledge_context=knowledge_context,
                         is_voice_output=voice_active,
+                        enable_web_search=enable_web_search,
                     )
             else:
                 reply = await gemini_service.generate_reply(
@@ -373,6 +421,7 @@ async def process_incoming_message(
                     language=bot_settings.language,
                     knowledge_context=knowledge_context,
                     is_voice_output=voice_active,
+                    enable_web_search=enable_web_search,
                 )
         except Exception as e:
             logger.error(f"Gemini error: {e}")

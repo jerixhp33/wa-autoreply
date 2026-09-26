@@ -222,12 +222,30 @@ async def handle_message(
     if res:
         reply_text = res.get("reply") if isinstance(res, dict) else res
         audio_path = res.get("audio_path") if isinstance(res, dict) else None
+        sticker_path = res.get("sticker_path") if isinstance(res, dict) else None
         conversation_id = res.get("conversation_id") if isinstance(res, dict) else None
         msg_id = res.get("message_id") if isinstance(res, dict) else None
 
         from app.services.message_service import update_outgoing_message_status
 
-        if audio_path:
+        if sticker_path:
+            sent_sticker = False
+            try:
+                await neonize_manager.send_sticker(account_id, sender, sticker_path)
+                logger.info(f"AI sticker sent to {sender}")
+                sent_sticker = True
+            except Exception as e:
+                logger.error(f"Failed to send AI sticker to {sender}: {e}")
+
+            if conversation_id:
+                await update_outgoing_message_status(
+                    account_id=account_id,
+                    conversation_id=conversation_id,
+                    message_content="[Sticker]",
+                    success=sent_sticker,
+                    message_id=msg_id,
+                )
+        elif audio_path:
             sent_audio = False
             try:
                 await neonize_manager.send_audio(account_id, sender, audio_path, is_ptt=True)

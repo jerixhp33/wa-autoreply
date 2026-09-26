@@ -492,6 +492,74 @@ class WhatsAppSession:
                 logger.error(f"Fallback send_audio also failed: {fb_err}")
             raise
 
+    def send_sticker(self, phone: str, image_path: str) -> bool:
+        """Convert image to 512x512 WebP sticker and send synchronously."""
+        if not self.client or not self.connected:
+            raise RuntimeError(f"WhatsApp not connected for account {self.account_id}")
+
+        if not os.path.exists(image_path) or os.path.getsize(image_path) == 0:
+            raise ValueError(f"Image file not found or empty: {image_path}")
+
+        try:
+            from PIL import Image
+            from neonize.client import build_jid
+            import io
+
+            clean_phone = "".join(c for c in phone if c.isdigit())
+            jid = build_jid(clean_phone, "s.whatsapp.net")
+
+            try:
+                lid_jid = self.client.get_lid_from_pn(jid)
+                if lid_jid and lid_jid.User:
+                    jid = lid_jid
+            except Exception:
+                pass
+
+            # Prepare 512x512 WebP sticker file
+            webp_path = os.path.splitext(image_path)[0] + "_sticker.webp"
+            if not os.path.exists(webp_path):
+                with Image.open(image_path) as img:
+                    img = img.convert("RGBA")
+                    img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+                    canvas = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+                    offset = ((512 - img.width) // 2, (512 - img.height) // 2)
+                    canvas.paste(img, offset)
+                    canvas.save(webp_path, format="WEBP", quality=90)
+
+            abs_webp = os.path.abspath(webp_path)
+            # Try client.send_sticker first
+            if hasattr(self.client, "send_sticker"):
+                try:
+                    self.client.send_sticker(jid, abs_webp)
+                    logger.info(f"Sticker sent via send_sticker to {clean_phone}")
+                    return True
+                except Exception as sticker_err:
+                    logger.warning(f"send_sticker method call failed ({sticker_err}), falling back to direct protobuf")
+
+            # Fallback to direct protobuf upload
+            from neonize.proto.waE2E.WAWebProtobufsE2E_pb2 import StickerMessage, Message
+            from neonize.utils.enum import MediaType
+
+            with open(abs_webp, "rb") as f:
+                sticker_bytes = f.read()
+
+            upload = self.client.upload(sticker_bytes, MediaType.MediaImage)
+            sticker_msg = StickerMessage(
+                URL=upload.url,
+                directPath=upload.DirectPath,
+                mediaKey=upload.MediaKey,
+                fileSHA256=upload.FileSHA256,
+                fileEncSHA256=upload.FileEncSHA256,
+                fileLength=upload.FileLength,
+                mimetype="image/webp",
+            )
+            self.client.send_message(jid, Message(stickerMessage=sticker_msg))
+            logger.info(f"Sticker sent via protobuf to {clean_phone}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send sticker to {phone}: {e}", exc_info=True)
+            raise
+
     def stop(self):
         """Stop the session."""
         self._stopped = True
@@ -607,6 +675,14 @@ class NeonizeManager:
             raise RuntimeError(f"No active session for account {account_id}")
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, session.send_audio, phone, audio_path, is_ptt)
+
+    async def send_sticker(self, account_id: str, phone: str, image_path: str) -> bool:
+        """Send a sticker from a specific account (async wrapper)."""
+        session = self.sessions.get(account_id)
+        if not session:
+            raise RuntimeError(f"No active session for account {account_id}")
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, session.send_sticker, phone, image_path)
 
     def get_session(self, account_id: str) -> Optional[WhatsAppSession]:
         return self.sessions.get(account_id)

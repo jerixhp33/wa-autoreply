@@ -92,6 +92,10 @@ async def update_bot_settings(
         bot_settings.voice_reply_mode = data.voice_reply_mode
     if data.groq_api_key is not None:
         bot_settings.groq_api_key = data.groq_api_key.strip() if data.groq_api_key else None
+    if data.web_search_enabled is not None:
+        bot_settings.web_search_enabled = data.web_search_enabled
+    if data.stickers_enabled is not None:
+        bot_settings.stickers_enabled = data.stickers_enabled
 
     try:
         db.commit()
@@ -105,6 +109,8 @@ async def update_bot_settings(
             conn.execute(text("ALTER TABLE bot_settings ADD COLUMN IF NOT EXISTS voice_name VARCHAR DEFAULT 'en-IN-NeerjaNeural';"))
             conn.execute(text("ALTER TABLE bot_settings ADD COLUMN IF NOT EXISTS voice_reply_mode VARCHAR DEFAULT 'audio_only';"))
             conn.execute(text("ALTER TABLE bot_settings ADD COLUMN IF NOT EXISTS groq_api_key VARCHAR;"))
+            conn.execute(text("ALTER TABLE bot_settings ADD COLUMN IF NOT EXISTS web_search_enabled BOOLEAN DEFAULT TRUE;"))
+            conn.execute(text("ALTER TABLE bot_settings ADD COLUMN IF NOT EXISTS stickers_enabled BOOLEAN DEFAULT TRUE;"))
             conn.commit()
 
         # Re-apply values and retry commit

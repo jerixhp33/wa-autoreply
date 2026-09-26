@@ -134,6 +134,10 @@ class MessageResponse(BaseModel):
     direction: str
     message_type: str
     content: Optional[str] = None
+    media_path: Optional[str] = None
+    media_mime_type: Optional[str] = None
+    media_caption: Optional[str] = None
+    transcription: Optional[str] = None
     ai_generated: bool
     status: str
     created_at: datetime
@@ -178,6 +182,8 @@ class BotSettingsResponse(BaseModel):
     voice_name: str = "en-IN-NeerjaNeural"
     voice_reply_mode: str = "audio_only"
     groq_api_key: Optional[str] = None
+    web_search_enabled: bool = True
+    stickers_enabled: bool = True
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -195,6 +201,8 @@ class BotSettingsUpdate(BaseModel):
     voice_name: Optional[str] = None
     voice_reply_mode: Optional[str] = None
     groq_api_key: Optional[str] = None
+    web_search_enabled: Optional[bool] = None
+    stickers_enabled: Optional[bool] = None
 
 
 class VoicePreviewRequest(BaseModel):

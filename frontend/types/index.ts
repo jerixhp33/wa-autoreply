@@ -48,6 +48,10 @@ export interface Message {
   content: string;
   ai_generated: boolean;
   status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
+  media_path?: string | null;
+  media_mime_type?: string | null;
+  media_caption?: string | null;
+  transcription?: string | null;
   created_at: string;
 }
 
@@ -62,6 +66,8 @@ export interface BotSettings {
   voice_reply_enabled: boolean;
   voice_name: string;
   voice_reply_mode: 'audio_only' | 'always';
+  web_search_enabled?: boolean;
+  stickers_enabled?: boolean;
   groq_api_key?: string | null;
   created_at: string;
   updated_at: string | null;

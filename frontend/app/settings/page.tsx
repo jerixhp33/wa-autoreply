@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Bot, Save, Loader2, Settings2, Sun, Moon, Mic, Play, Square, Volume2, Sparkles } from 'lucide-react';
+import { Bot, Save, Loader2, Settings2, Sun, Moon, Mic, Play, Square, Volume2, Sparkles, Globe, Smile } from 'lucide-react';
 import { whatsappApi, botApi } from '@/lib/api';
 import { WhatsAppAccount, BotSettings } from '@/types';
 import { toast } from 'sonner';
@@ -108,6 +108,8 @@ export default function SettingsPage() {
     voice_reply_enabled: false,
     voice_name: 'en-IN-PrabhatNeural',
     voice_reply_mode: 'audio_only',
+    web_search_enabled: true,
+    stickers_enabled: true,
     groq_api_key: '',
   });
 
@@ -206,6 +208,8 @@ export default function SettingsPage() {
           voice_reply_enabled: res.data.voice_reply_enabled ?? false,
           voice_name: res.data.voice_name ?? 'en-IN-PrabhatNeural',
           voice_reply_mode: res.data.voice_reply_mode ?? 'audio_only',
+          web_search_enabled: res.data.web_search_enabled ?? true,
+          stickers_enabled: res.data.stickers_enabled ?? true,
           groq_api_key: res.data.groq_api_key ?? '',
         });
       } catch (err) {
@@ -380,6 +384,44 @@ export default function SettingsPage() {
                 className={`relative h-6 w-11 rounded-full transition-colors ${form.respond_to_groups ? 'bg-whatsapp' : 'bg-muted'}`}
               >
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${form.respond_to_groups ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+
+            {/* Google Search Grounding */}
+            <div className="flex items-center justify-between rounded-xl border border-border/70 bg-muted/15 p-4">
+              <div className="pr-4">
+                <p className="text-sm font-semibold flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-blue-500" /> Live Web Search Grounding (Real-Time Knowledge)
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Empowers Gemini to search the web in real-time for live cricket scores, latest weather, breaking news, cinema releases, and current events.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setForm(f => ({ ...f, web_search_enabled: !f.web_search_enabled }))}
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${form.web_search_enabled ? 'bg-whatsapp' : 'bg-muted'}`}
+              >
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${form.web_search_enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+
+            {/* WhatsApp Sticker Creator */}
+            <div className="flex items-center justify-between rounded-xl border border-border/70 bg-muted/15 p-4">
+              <div className="pr-4">
+                <p className="text-sm font-semibold flex items-center gap-2">
+                  <Smile className="h-4 w-4 text-amber-500" /> Instant WhatsApp Sticker Creator
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Automatically converts photos sent by contacts with caption <code className="bg-background px-1 py-0.5 rounded text-[11px] font-mono">sticker</code> or <code className="bg-background px-1 py-0.5 rounded text-[11px] font-mono">ஸ்டிக்கர்</code> into native 512×512 WhatsApp stickers.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setForm(f => ({ ...f, stickers_enabled: !f.stickers_enabled }))}
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${form.stickers_enabled ? 'bg-whatsapp' : 'bg-muted'}`}
+              >
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${form.stickers_enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
               </button>
             </div>
 

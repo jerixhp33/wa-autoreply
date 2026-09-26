@@ -25,6 +25,8 @@ def create_tables():
         ("bot_settings", "voice_reply_enabled", "BOOLEAN DEFAULT FALSE"),
         ("bot_settings", "voice_name", "VARCHAR DEFAULT 'en-IN-NeerjaNeural'"),
         ("bot_settings", "voice_reply_mode", "VARCHAR DEFAULT 'audio_only'"),
+        ("bot_settings", "web_search_enabled", "BOOLEAN DEFAULT TRUE"),
+        ("bot_settings", "stickers_enabled", "BOOLEAN DEFAULT TRUE"),
         ("messages", "media_path", "VARCHAR"),
         ("messages", "media_mime_type", "VARCHAR"),
         ("messages", "media_caption", "TEXT"),

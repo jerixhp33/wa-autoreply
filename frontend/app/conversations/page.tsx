@@ -3,32 +3,194 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Bot, User, Clock, CheckCheck, Send, Loader2,
-  UserCheck, BotOff, Search, MessageSquare, Sparkles
+  UserCheck, BotOff, Search, MessageSquare, Sparkles,
+  Play, Pause, Mic, Smile, Image as ImageIcon
 } from 'lucide-react';
-import { conversationsApi, messagesApi, whatsappApi } from '@/lib/api';
+import { conversationsApi, messagesApi, whatsappApi, API_BASE } from '@/lib/api';
 import { Conversation, Message, WhatsAppAccount } from '@/types';
 import { formatRelativeTime, formatTime, getInitials, cn, truncate } from '@/lib/utils';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { toast } from 'sonner';
 
+function VoiceNotePlayer({ message, isOutgoing }: { message: Message; isOutgoing: boolean }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const mediaUrl = `${API_BASE}/api/conversations/messages/${message.id}/media`;
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play().catch(err => {
+        console.error('Audio playback error:', err);
+      });
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      setCurrentTime(audioRef.current.currentTime);
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (audioRef.current && Number.isFinite(audioRef.current.duration)) {
+      setDuration(audioRef.current.duration);
+    }
+  };
+
+  const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    audioRef.current.currentTime = pos * duration;
+    setCurrentTime(pos * duration);
+  };
+
+  const formatSecs = (sec: number) => {
+    if (!sec || isNaN(sec)) return '0:00';
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const barHeights = [
+    30, 50, 75, 90, 60, 40, 80, 100, 70, 50, 85, 95, 65, 45, 80, 60,
+    90, 100, 75, 55, 40, 60, 85, 70, 95, 80, 50, 65, 90, 45, 35, 25
+  ];
+
+  return (
+    <div className="flex flex-col gap-2 w-64 sm:w-72">
+      <audio
+        ref={audioRef}
+        src={mediaUrl}
+        preload="metadata"
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => { setIsPlaying(false); setCurrentTime(0); }}
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleLoadedMetadata}
+      />
+      <div className="flex items-center gap-3">
+        <button
+          onClick={togglePlay}
+          className={cn(
+            "h-10 w-10 shrink-0 rounded-full flex items-center justify-center transition-transform hover:scale-105 active:scale-95 shadow-sm",
+            isOutgoing ? "bg-whatsapp text-white" : "bg-primary text-primary-foreground"
+          )}
+          title={isPlaying ? "Pause voice note" : "Play voice note"}
+        >
+          {isPlaying ? (
+            <Pause className="h-5 w-5 fill-current" />
+          ) : (
+            <Play className="h-5 w-5 fill-current ml-0.5" />
+          )}
+        </button>
+
+        {/* Waveform visualizer */}
+        <div
+          className="flex-1 flex flex-col justify-center cursor-pointer select-none"
+          onClick={handleSeek}
+        >
+          <div className="flex items-center gap-[2.5px] h-8 py-1">
+            {barHeights.map((h, i) => {
+              const barProgress = (i / barHeights.length) * 100;
+              const isPlayed = barProgress <= progressPercent;
+              return (
+                <div
+                  key={i}
+                  className={cn(
+                    "flex-1 rounded-full transition-all duration-150",
+                    isPlayed
+                      ? isOutgoing ? "bg-whatsapp" : "bg-primary"
+                      : "bg-muted-foreground/30 hover:bg-muted-foreground/50",
+                    isPlaying && isPlayed ? "opacity-100" : "opacity-80"
+                  )}
+                  style={{
+                    height: `${Math.max(15, h)}%`,
+                  }}
+                />
+              );
+            })}
+          </div>
+          <div className="flex justify-between items-center text-[10px] text-muted-foreground font-mono mt-0.5">
+            <span>{formatSecs(currentTime)}</span>
+            <span>{duration > 0 ? formatSecs(duration) : 'Voice note'}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Transcription snippet if available */}
+      {message.transcription && (
+        <div className="mt-1 pt-1.5 border-t border-border/40 text-xs text-muted-foreground flex items-start gap-1.5 bg-black/5 dark:bg-white/5 rounded p-1.5">
+          <Mic className="h-3 w-3 shrink-0 mt-0.5 text-whatsapp" />
+          <p className="italic leading-snug line-clamp-3">{message.transcription}</p>
+        </div>
+      )}
+
+      {/* Accompanying display text if present */}
+      {message.content && !message.content.startsWith('[Voice Note') && (
+        <p className="text-xs whitespace-pre-wrap break-words border-t border-border/30 pt-1 mt-0.5">
+          {message.content}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function MessageBubble({ message }: { message: Message }) {
   const isOutgoing = message.direction === 'outgoing';
+  const isAudio = message.message_type === 'audio' || (message.media_path && (message.media_path.endsWith('.ogg') || message.media_path.endsWith('.opus') || message.media_path.endsWith('.mp3')));
+  const isSticker = message.message_type === 'sticker' || (message.media_path && message.media_path.endsWith('.webp'));
+  const isImage = message.message_type === 'image' && !isSticker;
+
+  const mediaUrl = `${API_BASE}/api/conversations/messages/${message.id}/media`;
 
   return (
     <div className={cn('flex', isOutgoing ? 'justify-end' : 'justify-start')}>
       <div className="max-w-sm">
-        <div
-          className={cn(
-            'rounded-2xl px-4 py-2.5 text-sm',
-            isOutgoing && message.ai_generated
-              ? 'bg-whatsapp/15 border border-whatsapp/25 rounded-tr-sm'
-              : isOutgoing
-              ? 'bg-primary text-primary-foreground rounded-tr-sm'
-              : 'bg-card border border-border rounded-tl-sm'
-          )}
-        >
-          <p className="whitespace-pre-wrap break-words">{message.content}</p>
-        </div>
+        {isSticker ? (
+          <div className="p-1">
+            <img
+              src={mediaUrl}
+              alt="WhatsApp Sticker"
+              className="w-36 h-36 object-contain drop-shadow-md hover:scale-105 transition-transform"
+              loading="lazy"
+            />
+          </div>
+        ) : (
+          <div
+            className={cn(
+              'rounded-2xl px-4 py-2.5 text-sm',
+              isOutgoing && message.ai_generated
+                ? 'bg-whatsapp/15 border border-whatsapp/25 rounded-tr-sm'
+                : isOutgoing
+                ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                : 'bg-card border border-border rounded-tl-sm'
+            )}
+          >
+            {isImage && (
+              <div className="mb-2 overflow-hidden rounded-xl">
+                <img
+                  src={mediaUrl}
+                  alt="WhatsApp Media"
+                  className="max-h-60 w-full object-cover rounded-xl border border-border/50"
+                  loading="lazy"
+                />
+              </div>
+            )}
+            {isAudio ? (
+              <VoiceNotePlayer message={message} isOutgoing={isOutgoing} />
+            ) : (
+              <p className="whitespace-pre-wrap break-words">{message.content}</p>
+            )}
+          </div>
+        )}
         <div className={cn(
           'flex items-center gap-1.5 mt-1 px-1',
           isOutgoing ? 'justify-end' : 'justify-start'
@@ -37,6 +199,9 @@ function MessageBubble({ message }: { message: Message }) {
             <span className="flex items-center gap-1 text-[10px] text-whatsapp font-medium">
               <Sparkles className="h-2.5 w-2.5" /> AI
             </span>
+          )}
+          {isSticker && (
+            <span className="text-[10px] text-muted-foreground font-medium">Sticker</span>
           )}
           <span className="text-[10px] text-muted-foreground">{formatTime(message.created_at)}</span>
           {isOutgoing && (
@@ -165,7 +330,11 @@ export default function ConversationsPage() {
           content: data.content,
           ai_generated: false,
           status: 'delivered',
-          message_type: 'text',
+          message_type: data.message_type || 'text',
+          media_path: data.media_path || null,
+          media_mime_type: data.media_mime_type || null,
+          media_caption: data.media_caption || null,
+          transcription: data.transcription || null,
           whatsapp_message_id: null,
           created_at: data.created_at,
         });
@@ -189,7 +358,11 @@ export default function ConversationsPage() {
           content: data.content,
           ai_generated: true,
           status: 'sent',
-          message_type: 'text',
+          message_type: data.message_type || 'text',
+          media_path: data.media_path || null,
+          media_mime_type: data.media_mime_type || null,
+          media_caption: data.media_caption || null,
+          transcription: data.transcription || null,
           whatsapp_message_id: null,
           created_at: data.created_at,
         });
@@ -206,7 +379,11 @@ export default function ConversationsPage() {
           content: data.content,
           ai_generated: false,
           status: 'sent',
-          message_type: 'text',
+          message_type: data.message_type || 'text',
+          media_path: data.media_path || null,
+          media_mime_type: data.media_mime_type || null,
+          media_caption: data.media_caption || null,
+          transcription: data.transcription || null,
           whatsapp_message_id: null,
           created_at: data.created_at,
         });
