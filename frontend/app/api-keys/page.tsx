@@ -5,7 +5,7 @@ import {
   Key, Plus, Trash2, Copy, Check, Eye, EyeOff,
   Loader2, AlertTriangle, Clock
 } from 'lucide-react';
-import { apiKeysApi } from '@/lib/api';
+import { apiKeysApi, whatsappApi } from '@/lib/api';
 import { ApiKey, ApiKeyCreated } from '@/types';
 import { formatDate, formatRelativeTime } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -69,11 +69,16 @@ export default function ApiKeysPage() {
   const [newName, setNewName] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null);
+  const [accountAccountId, setAccountAccountId] = useState<string | null>(null);
 
   const load = async () => {
     try {
       const res = await apiKeysApi.list();
       setKeys(res.data);
+      const accsRes = await whatsappApi.listAccounts();
+      if (accsRes.data && accsRes.data.length > 0) {
+        setAccountAccountId(accsRes.data[0].id);
+      }
     } catch (err) {
       console.error('Failed to load API keys', err);
     } finally {
@@ -171,13 +176,21 @@ export default function ApiKeysPage() {
 
       {/* API Usage docs */}
       <div className="rounded-xl border border-border bg-card p-5 mb-6">
-        <h3 className="font-semibold mb-3 text-sm">How to use</h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-sm">How to use</h3>
+          <a href="/whatsapp" className="text-xs text-whatsapp hover:underline font-medium flex items-center gap-1">
+            Find Account ID →
+          </a>
+        </div>
         <div className="space-y-3 font-mono text-xs bg-muted rounded-lg p-4">
           <p className="text-muted-foreground"># Send a message via API</p>
-          <p>curl -X POST https://your-domain/api/v1/messages/send \</p>
-          <p className="pl-4">-H "Authorization: Bearer wha_live_xxx..." \</p>
+          <p>curl -X POST https://wa-autoreply-a416.onrender.com/api/v1/messages/send \</p>
+          <p className="pl-4">-H "Authorization: Bearer {newKey?.key || 'wha_live_xxx...'}" \</p>
           <p className="pl-4">-H "Content-Type: application/json" \</p>
-          <p className="pl-4">-d {'\'{"account_id": "ACCOUNT_ID", "phone": "919876543210", "message": "Hello!"}\''}</p>
+          <p className="pl-4">-d {'\'{"account_id": "' + (accountAccountId || 'YOUR_ACCOUNT_ID') + '", "phone": "919360490974", "message": "Hello!"}\''}</p>
+        </div>
+        <div className="mt-3 text-xs text-muted-foreground bg-muted/40 p-3 rounded-lg border border-border/50 flex items-center justify-between">
+          <span>💡 <strong>Need your Account ID?</strong> Go to <a href="/whatsapp" className="text-whatsapp font-medium hover:underline">WhatsApp Accounts</a> — each account card has a 1-click <strong>Copy ID</strong> button.</span>
         </div>
       </div>
 

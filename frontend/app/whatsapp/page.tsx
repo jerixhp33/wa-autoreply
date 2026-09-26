@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Plus, Smartphone, RefreshCw, Trash2, Unplug, QrCode, CheckCircle2,
-  AlertCircle, Loader2, X, Link2
+  AlertCircle, Loader2, X, Link2, Copy
 } from 'lucide-react';
 import { whatsappApi } from '@/lib/api';
 import { WhatsAppAccount } from '@/types';
@@ -178,6 +178,21 @@ function AccountCard({
             <p className="text-sm text-muted-foreground mt-0.5">
               {account.phone_number ? `+${account.phone_number}` : 'Not connected'}
             </p>
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <span className="font-mono text-[11px] text-muted-foreground bg-muted/80 px-2 py-0.5 rounded border border-border/50 select-all">
+                ID: {account.id}
+              </span>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(account.id);
+                  toast.success('Account ID copied to clipboard!');
+                }}
+                className="p-1 text-muted-foreground hover:text-foreground rounded-md hover:bg-accent transition-colors"
+                title="Copy Account ID"
+              >
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+            </div>
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium mt-2
               ${account.status === 'connected' ? 'bg-green-500/10 text-green-500' :
                 account.status === 'connecting' ? 'bg-yellow-500/10 text-yellow-500' :
