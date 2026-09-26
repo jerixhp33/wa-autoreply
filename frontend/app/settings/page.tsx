@@ -38,6 +38,7 @@ export default function SettingsPage() {
     voice_reply_enabled: false,
     voice_name: 'en-IN-NeerjaNeural',
     voice_reply_mode: 'audio_only',
+    groq_api_key: '',
   });
 
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -77,6 +78,7 @@ export default function SettingsPage() {
           voice_reply_enabled: res.data.voice_reply_enabled ?? false,
           voice_name: res.data.voice_name ?? 'en-IN-NeerjaNeural',
           voice_reply_mode: res.data.voice_reply_mode ?? 'audio_only',
+          groq_api_key: res.data.groq_api_key ?? '',
         });
       } catch (err) {
         console.error('Failed to load settings', err);
@@ -265,37 +267,63 @@ export default function SettingsPage() {
               </div>
 
               {form.voice_reply_enabled && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-border/50">
-                  {/* Voice Accent Selector */}
-                  <div>
-                    <label className="block text-xs font-medium mb-1.5">Voice Accent & Persona</label>
-                    <select
-                      value={form.voice_name}
-                      onChange={(e) => setForm(f => ({ ...f, voice_name: e.target.value }))}
-                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-whatsapp"
-                    >
-                      <option value="en-IN-NeerjaNeural">🇮🇳 Indian English (Female - Neerja)</option>
-                      <option value="en-IN-PrabhatNeural">🇮🇳 Indian English (Male - Prabhat)</option>
-                      <option value="en-US-JennyNeural">🇺🇸 US English (Female - Jenny)</option>
-                      <option value="en-US-GuyNeural">🇺🇸 US English (Male - Guy)</option>
-                      <option value="ta-IN-PallaviNeural">🇮🇳 Tamil (Female - Pallavi)</option>
-                      <option value="ta-IN-ValluvarNeural">🇮🇳 Tamil (Male - Valluvar)</option>
-                      <option value="hi-IN-SwaraNeural">🇮🇳 Hindi (Female - Swara)</option>
-                      <option value="hi-IN-MadhurNeural">🇮🇳 Hindi (Male - Madhur)</option>
-                    </select>
+                <div className="space-y-4 pt-2 border-t border-border/50">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Voice Accent Selector */}
+                    <div>
+                      <label className="block text-xs font-medium mb-1.5">Voice Accent & Persona</label>
+                      <select
+                        value={form.voice_name}
+                        onChange={(e) => setForm(f => ({ ...f, voice_name: e.target.value }))}
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-whatsapp"
+                      >
+                        <optgroup label="⚡ Groq PlayAI Studio Voices (Ultra Quality)">
+                          <option value="Fritz-PlayAI">Groq PlayAI - Fritz (Dynamic Male)</option>
+                          <option value="Aria-PlayAI">Groq PlayAI - Aria (Expressive Female)</option>
+                          <option value="Dexter-PlayAI">Groq PlayAI - Dexter (Deep Male)</option>
+                        </optgroup>
+                        <optgroup label="Microsoft Natural Neural Voices">
+                          <option value="en-IN-NeerjaNeural">🇮🇳 Indian English (Female - Neerja)</option>
+                          <option value="en-IN-PrabhatNeural">🇮🇳 Indian English (Male - Prabhat)</option>
+                          <option value="ta-IN-PallaviNeural">🇮🇳 Tamil (Female - Pallavi)</option>
+                          <option value="ta-IN-ValluvarNeural">🇮🇳 Tamil (Male - Valluvar)</option>
+                          <option value="hi-IN-SwaraNeural">🇮🇳 Hindi (Female - Swara)</option>
+                          <option value="hi-IN-MadhurNeural">🇮🇳 Hindi (Male - Madhur)</option>
+                          <option value="en-US-JennyNeural">🇺🇸 US English (Female - Jenny)</option>
+                          <option value="en-US-GuyNeural">🇺🇸 US English (Male - Guy)</option>
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    {/* Voice Trigger Mode */}
+                    <div>
+                      <label className="block text-xs font-medium mb-1.5">When to send voice notes</label>
+                      <select
+                        value={form.voice_reply_mode}
+                        onChange={(e) => setForm(f => ({ ...f, voice_reply_mode: e.target.value as any }))}
+                        className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-whatsapp"
+                      >
+                        <option value="audio_only">Only when customer sends a voice note</option>
+                        <option value="always">Always reply with voice note</option>
+                      </select>
+                    </div>
                   </div>
 
-                  {/* Voice Trigger Mode */}
-                  <div>
-                    <label className="block text-xs font-medium mb-1.5">When to send voice notes</label>
-                    <select
-                      value={form.voice_reply_mode}
-                      onChange={(e) => setForm(f => ({ ...f, voice_reply_mode: e.target.value as any }))}
-                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-whatsapp"
-                    >
-                      <option value="audio_only">Only when customer sends a voice note</option>
-                      <option value="always">Always reply with voice note</option>
-                    </select>
+                  {/* Groq API Key Input */}
+                  <div className="rounded-lg bg-background/50 border border-border/60 p-3">
+                    <label className="block text-xs font-medium mb-1">
+                      Groq API Key <span className="text-muted-foreground font-normal">(Optional — enables ~150ms Whisper audio transcription & PlayAI studio TTS)</span>
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="gsk_..."
+                      value={form.groq_api_key || ''}
+                      onChange={(e) => setForm(f => ({ ...f, groq_api_key: e.target.value }))}
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-whatsapp font-mono"
+                    />
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Get a free key from <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="text-whatsapp underline font-medium">console.groq.com</a>. With Groq, incoming voice notes in Tamil, Hindi, or English are transcribed in ~150ms so AI understands and replies accurately.
+                    </p>
                   </div>
                 </div>
               )}

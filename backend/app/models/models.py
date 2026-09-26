@@ -149,6 +149,7 @@ Make the response suitable for WhatsApp.""")
     voice_reply_enabled = Column(Boolean, default=False)
     voice_name = Column(String, default="en-IN-NeerjaNeural")
     voice_reply_mode = Column(String, default="audio_only")  # 'audio_only' or 'always'
+    groq_api_key = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

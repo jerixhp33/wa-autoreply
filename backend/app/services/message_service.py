@@ -271,7 +271,36 @@ async def process_incoming_message(
 
         # Generate AI reply
         try:
-            if media_path and media_type in ("image", "audio"):
+            # 1. If incoming message is audio, first try high-speed Groq Whisper transcription
+            transcribed_audio_text = None
+            if media_type == "audio" and media_path:
+                try:
+                    from app.services.groq_service import transcribe_audio_groq
+                    groq_key = getattr(bot_settings, "groq_api_key", None)
+                    transcribed_audio_text = await transcribe_audio_groq(
+                        audio_path=media_path,
+                        groq_api_key=groq_key,
+                        language=bot_settings.language,
+                    )
+                    if transcribed_audio_text:
+                        logger.info(f"Incoming audio successfully transcribed: '{transcribed_audio_text}'")
+                        content = f"[Voice Note: {transcribed_audio_text}]"
+                        incoming_msg.content = content
+                        db.commit()
+                except Exception as t_err:
+                    logger.warning(f"Voice transcription attempt failed: {t_err}")
+
+            if transcribed_audio_text:
+                # Transcribed cleanly! Use standard text prompt with the actual words spoken
+                reply = await gemini_service.generate_reply(
+                    system_prompt=bot_settings.system_prompt,
+                    conversation_history=history,
+                    user_message=transcribed_audio_text,
+                    max_length=bot_settings.max_reply_length,
+                    language=bot_settings.language,
+                    knowledge_context=knowledge_context,
+                )
+            elif media_path and media_type in ("image", "audio"):
                 # Read media bytes for multimodal AI processing
                 import aiofiles
                 try:
@@ -363,6 +392,7 @@ async def process_incoming_message(
                         text=reply,
                         voice_name=voice_name,
                         output_path=target_audio,
+                        groq_api_key=getattr(bot_settings, "groq_api_key", None),
                     )
                 except Exception as tts_err:
                     logger.error(f"Voice note generation failed: {tts_err}")

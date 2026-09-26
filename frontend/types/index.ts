@@ -62,6 +62,7 @@ export interface BotSettings {
   voice_reply_enabled: boolean;
   voice_name: string;
   voice_reply_mode: 'audio_only' | 'always';
+  groq_api_key?: string | null;
   created_at: string;
   updated_at: string | null;
 }

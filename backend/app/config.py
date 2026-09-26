@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     gemini_api_key: str = ""
     gemini_model: str = "gemini-1.5-flash"
+    groq_api_key: str = ""
     jwt_secret: str = "change_this_in_production"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440  # 24 hours

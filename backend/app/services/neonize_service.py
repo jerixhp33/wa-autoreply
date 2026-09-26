@@ -379,48 +379,25 @@ class WhatsAppSession:
         if not self.client or not self.connected:
             raise RuntimeError(f"WhatsApp not connected for account {self.account_id}")
 
+        if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+            raise ValueError(f"Audio file not found or empty: {audio_path}")
+
         try:
             from neonize.client import build_jid
 
+            abs_path = os.path.abspath(audio_path)
+            # CRITICAL: WhatsApp media transfers require the standard phone JID (@s.whatsapp.net).
+            # Do NOT use LID JID for sending media/audio.
             jid = build_jid(phone, "s.whatsapp.net")
-            try:
-                lid_jid = self.client.get_lid_from_pn(jid)
-                if lid_jid and lid_jid.User:
-                    jid = lid_jid
-            except Exception:
-                pass
 
             if hasattr(self.client, "send_audio"):
-                try:
-                    self.client.send_audio(jid, audio_path, ptt=is_ptt)
-                    logger.info(f"Voice note sent to {phone} via send_audio")
-                    return True
-                except Exception as sa_err:
-                    logger.warning(f"send_audio failed: {sa_err}, attempting direct upload fallback")
-
-            # Fallback direct upload if send_audio failed or doesn't exist
-            with open(audio_path, "rb") as f:
-                audio_bytes = f.read()
-            upload_res = self.client.upload(audio_bytes)
-            import magic
-            from neonize.proto.Neonize_pb2 import Message, AudioMessage
-            mime = "audio/ogg; codecs=opus" if is_ptt else (magic.from_buffer(audio_bytes, mime=True) or "audio/ogg")
-            audio_msg = AudioMessage(
-                URL=getattr(upload_res, "url", getattr(upload_res, "URL", "")),
-                seconds=5,
-                directPath=getattr(upload_res, "DirectPath", getattr(upload_res, "directPath", "")),
-                fileEncSHA256=getattr(upload_res, "FileEncSHA256", getattr(upload_res, "fileEncSHA256", b"")),
-                fileLength=len(audio_bytes),
-                fileSHA256=getattr(upload_res, "FileSHA256", getattr(upload_res, "fileSHA256", b"")),
-                mediaKey=getattr(upload_res, "MediaKey", getattr(upload_res, "mediaKey", b"")),
-                mimetype=mime,
-                PTT=is_ptt,
-            )
-            self.client.send_message(jid, Message(audioMessage=audio_msg))
-            logger.info(f"Voice note sent to {phone} via manual upload fallback")
-            return True
+                self.client.send_audio(jid, abs_path, ptt=is_ptt)
+                logger.info(f"Voice note sent to {phone} via send_audio: {abs_path}")
+                return True
+            else:
+                raise NotImplementedError("neonize NewClient has no send_audio attribute")
         except Exception as e:
-            logger.error(f"Failed to send voice note to {phone}: {e}")
+            logger.error(f"Failed to send voice note to {phone}: {e}", exc_info=True)
             raise
 
     def stop(self):

@@ -8,14 +8,19 @@ logger = logging.getLogger(__name__)
 DEFAULT_VOICE = "en-IN-NeerjaNeural"
 
 VOICE_CATALOG = {
+    # Groq PlayAI Studio Voices
+    "Fritz-PlayAI": "Groq PlayAI (Dynamic Male - Fritz)",
+    "Aria-PlayAI": "Groq PlayAI (Expressive Female - Aria)",
+    "Dexter-PlayAI": "Groq PlayAI (Deep Male - Dexter)",
+    # Microsoft Edge Natural Voices (Indian & Global)
     "en-IN-NeerjaNeural": "Indian English (Female - Neerja)",
     "en-IN-PrabhatNeural": "Indian English (Male - Prabhat)",
-    "en-US-JennyNeural": "US English (Female - Jenny)",
-    "en-US-GuyNeural": "US English (Male - Guy)",
     "ta-IN-PallaviNeural": "Tamil (Female - Pallavi)",
     "ta-IN-ValluvarNeural": "Tamil (Male - Valluvar)",
     "hi-IN-SwaraNeural": "Hindi (Female - Swara)",
     "hi-IN-MadhurNeural": "Hindi (Male - Madhur)",
+    "en-US-JennyNeural": "US English (Female - Jenny)",
+    "en-US-GuyNeural": "US English (Male - Guy)",
 }
 
 
@@ -23,15 +28,41 @@ async def generate_voice_note(
     text: str,
     voice_name: Optional[str] = None,
     output_path: Optional[str] = None,
+    groq_api_key: Optional[str] = None,
 ) -> Optional[str]:
     """
-    Generate an audio voice note from text using edge-tts.
-    Returns the file path of the generated audio or None if failed.
+    Generate an audio voice note from text.
+    Uses Groq PlayAI TTS if configured/selected, with automatic fallback to Edge-TTS.
+    Always produces WhatsApp-compliant 16kHz mono OGG Opus.
     """
     if not text or not text.strip():
         return None
 
     voice = voice_name if voice_name in VOICE_CATALOG else DEFAULT_VOICE
+
+    # 1. Try Groq PlayAI TTS if requested or if Groq API key is present with a PlayAI voice
+    if voice.endswith("-PlayAI") or (groq_api_key and "PlayAI" in voice):
+        try:
+            from app.services.groq_service import generate_speech_groq
+            groq_voice = voice.replace("-PlayAI", "")
+            if not groq_voice.endswith("-PlayAI") and groq_voice not in ("Aria", "Dexter"):
+                groq_voice = f"{groq_voice}-PlayAI"
+            groq_result = await generate_speech_groq(
+                text=text,
+                voice=groq_voice,
+                groq_api_key=groq_api_key,
+                output_path=output_path,
+            )
+            if groq_result and os.path.exists(groq_result) and os.path.getsize(groq_result) > 0:
+                logger.info(f"Generated voice note with Groq TTS: {groq_result}")
+                return groq_result
+            else:
+                logger.warning("Groq TTS did not return valid audio, falling back to Edge-TTS")
+        except Exception as groq_err:
+            logger.warning(f"Groq TTS failed: {groq_err}, falling back to Edge-TTS")
+
+    # If voice was a PlayAI voice but Groq failed or wasn't configured, fallback to default Edge voice
+    edge_voice = voice if not voice.endswith("-PlayAI") else DEFAULT_VOICE
 
     # Clean text of markdown asterisks, URLs, and code blocks for clean speech
     clean_text = text.replace("*", "").replace("#", "").replace("_", "").replace("`", "").strip()
@@ -53,7 +84,7 @@ async def generate_voice_note(
         fd, temp_mp3 = tempfile.mkstemp(suffix=".mp3")
         os.close(fd)
 
-        communicate = edge_tts.Communicate(clean_text, voice)
+        communicate = edge_tts.Communicate(clean_text, edge_voice)
         await communicate.save(temp_mp3)
 
         if not os.path.exists(temp_mp3) or os.path.getsize(temp_mp3) == 0:
@@ -92,7 +123,7 @@ async def generate_voice_note(
             pass
 
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            logger.info(f"Generated voice note ({voice}): {output_path} ({os.path.getsize(output_path)} bytes)")
+            logger.info(f"Generated voice note ({edge_voice}): {output_path} ({os.path.getsize(output_path)} bytes)")
             return output_path
         else:
             logger.warning("TTS output file is missing or empty")

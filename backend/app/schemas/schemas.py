@@ -177,6 +177,7 @@ class BotSettingsResponse(BaseModel):
     voice_reply_enabled: bool = False
     voice_name: str = "en-IN-NeerjaNeural"
     voice_reply_mode: str = "audio_only"
+    groq_api_key: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -193,6 +194,7 @@ class BotSettingsUpdate(BaseModel):
     voice_reply_enabled: Optional[bool] = None
     voice_name: Optional[str] = None
     voice_reply_mode: Optional[str] = None
+    groq_api_key: Optional[str] = None
 
 
 # ─── Documents (Knowledge Base) ───────────────────────────────────────────────
