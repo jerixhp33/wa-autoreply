@@ -92,7 +92,9 @@ export default function SettingsPage() {
       await botApi.updateSettings(selectedId, form);
       toast.success('Settings saved');
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || 'Failed to save settings');
+      const detail = err.response?.data?.detail;
+      const message = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : 'Failed to save settings';
+      toast.error(message);
     } finally {
       setSaving(false);
     }

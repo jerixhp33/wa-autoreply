@@ -90,6 +90,38 @@ async def update_bot_settings(
     if data.voice_reply_mode is not None:
         bot_settings.voice_reply_mode = data.voice_reply_mode
 
-    db.commit()
-    db.refresh(bot_settings)
+    try:
+        db.commit()
+        db.refresh(bot_settings)
+    except Exception as commit_err:
+        logger.warning(f"Initial commit failed (attempting schema auto-migration): {commit_err}")
+        db.rollback()
+        from sqlalchemy import text
+        with db.bind.connect() as conn:
+            conn.execute(text("ALTER TABLE bot_settings ADD COLUMN IF NOT EXISTS voice_reply_enabled BOOLEAN DEFAULT FALSE;"))
+            conn.execute(text("ALTER TABLE bot_settings ADD COLUMN IF NOT EXISTS voice_name VARCHAR DEFAULT 'en-IN-NeerjaNeural';"))
+            conn.execute(text("ALTER TABLE bot_settings ADD COLUMN IF NOT EXISTS voice_reply_mode VARCHAR DEFAULT 'audio_only';"))
+            conn.commit()
+
+        # Re-apply values and retry commit
+        if data.enabled is not None:
+            bot_settings.enabled = data.enabled
+        if data.system_prompt is not None:
+            bot_settings.system_prompt = data.system_prompt
+        if data.language is not None:
+            bot_settings.language = data.language
+        if data.max_reply_length is not None:
+            bot_settings.max_reply_length = data.max_reply_length
+        if data.respond_to_groups is not None:
+            bot_settings.respond_to_groups = data.respond_to_groups
+        if data.voice_reply_enabled is not None:
+            bot_settings.voice_reply_enabled = data.voice_reply_enabled
+        if data.voice_name is not None:
+            bot_settings.voice_name = data.voice_name
+        if data.voice_reply_mode is not None:
+            bot_settings.voice_reply_mode = data.voice_reply_mode
+
+        db.commit()
+        db.refresh(bot_settings)
+
     return BotSettingsResponse.model_validate(bot_settings)
