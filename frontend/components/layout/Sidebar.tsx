@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, MessageSquare, Smartphone, Settings, Key,
-  LogOut, Bot, Wifi, WifiOff
+  LogOut, Bot, Wifi, WifiOff, BookOpen
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
@@ -15,6 +15,7 @@ const navItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/conversations', icon: MessageSquare, label: 'Conversations' },
   { href: '/whatsapp', icon: Smartphone, label: 'WhatsApp Accounts' },
+  { href: '/knowledge', icon: BookOpen, label: 'Knowledge Base' },
   { href: '/settings', icon: Settings, label: 'Settings' },
   { href: '/api-keys', icon: Key, label: 'API Keys' },
 ];

@@ -69,6 +69,7 @@ class WhatsAppAccount(Base):
     contacts = relationship("Contact", back_populates="whatsapp_account", cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="whatsapp_account", cascade="all, delete-orphan")
     bot_settings = relationship("BotSettings", back_populates="whatsapp_account", cascade="all, delete-orphan", uselist=False)
+    documents = relationship("Document", back_populates="whatsapp_account", cascade="all, delete-orphan")
 
 
 class Contact(Base):
@@ -144,6 +145,9 @@ Make the response suitable for WhatsApp.""")
     language = Column(String, default="automatic")
     max_reply_length = Column(Integer, default=500)
     respond_to_groups = Column(Boolean, default=False)
+    voice_reply_enabled = Column(Boolean, default=False)
+    voice_name = Column(String, default="en-IN-NeerjaNeural")
+    voice_reply_mode = Column(String, default="audio_only")  # 'audio_only' or 'always'
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -163,3 +167,19 @@ class ApiKey(Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", back_populates="api_keys")
+
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    whatsapp_account_id = Column(String, ForeignKey("whatsapp_accounts.id"), nullable=False)
+    filename = Column(String, nullable=False)
+    file_type = Column(String, nullable=False)  # 'pdf', 'txt'
+    file_size = Column(Integer, default=0)
+    extracted_text = Column(Text, nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    whatsapp_account = relationship("WhatsAppAccount", back_populates="documents")
+

@@ -59,8 +59,26 @@ export interface BotSettings {
   language: string;
   max_reply_length: number;
   respond_to_groups: boolean;
+  voice_reply_enabled: boolean;
+  voice_name: string;
+  voice_reply_mode: 'audio_only' | 'always';
   created_at: string;
   updated_at: string | null;
+}
+
+export interface Document {
+  id: string;
+  whatsapp_account_id: string;
+  filename: string;
+  file_type: string;
+  file_size: number;
+  is_active: boolean;
+  created_at: string;
+  extracted_text_preview?: string;
+}
+
+export interface DocumentDetail extends Document {
+  extracted_text: string;
 }
 
 export interface ApiKey {

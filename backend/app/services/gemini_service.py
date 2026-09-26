@@ -52,6 +52,7 @@ class GeminiService:
         user_message: str,
         max_length: int = 500,
         language: str = "automatic",
+        knowledge_context: Optional[str] = None,
     ) -> Optional[str]:
         """
         Generate an AI reply.
@@ -63,6 +64,7 @@ class GeminiService:
             user_message:         The new incoming customer message.
             max_length:           Character limit for the reply.
             language:             Language override (e.g. "english", "tamil", "automatic").
+            knowledge_context:    Business knowledge base documents text.
 
         Returns:
             The generated reply string, or None on failure.
@@ -87,6 +89,10 @@ class GeminiService:
         full_system = full_system.replace('{current_time}', current_time)
         full_system = full_system.replace('{current_date}', current_date)
         full_system += f"\n\n## LIVE DATETIME\nCurrent IST Time: {current_time}\nCurrent Date: {current_date}\nAlways use this when user asks about time or date."
+
+        if knowledge_context:
+            full_system += f"\n\n## VERIFIED BUSINESS KNOWLEDGE BASE\nUse the following official business documents to answer customer questions accurately:\n{knowledge_context}\nAnswer strictly based on this knowledge. Never invent prices, products, or policies."
+
         if language and language != "automatic":
             full_system += f"\n\nAlways respond in: {language}."
         if max_length and max_length > 0:
@@ -174,6 +180,7 @@ class GeminiService:
         caption: str = None,
         max_length: int = 500,
         language: str = "automatic",
+        knowledge_context: Optional[str] = None,
     ) -> Optional[str]:
         """
         Generate an AI reply for multimodal inputs (images, audio).
@@ -198,6 +205,10 @@ class GeminiService:
         full_system = full_system.replace('{current_time}', current_time)
         full_system = full_system.replace('{current_date}', current_date)
         full_system += f"\n\n## LIVE DATETIME\nCurrent IST Time: {current_time}\nCurrent Date: {current_date}\nAlways use this when user asks about time or date."
+
+        if knowledge_context:
+            full_system += f"\n\n## VERIFIED BUSINESS KNOWLEDGE BASE\nUse the following official business documents to answer customer questions accurately:\n{knowledge_context}\nAnswer strictly based on this knowledge. Never invent prices, products, or policies."
+
         if language and language != "automatic":
             full_system += f"\n\nAlways respond in: {language}."
         if max_length and max_length > 0:

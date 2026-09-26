@@ -264,6 +264,11 @@ async def process_incoming_message(
         if history and history[-1]["content"] == content:
             history = history[:-1]
 
+        # Retrieve active knowledge base documents context for this account
+        from app.services.document_service import get_active_knowledge_context
+        from app.services.tts_service import generate_voice_note
+        knowledge_context = get_active_knowledge_context(db, account_id)
+
         # Generate AI reply
         try:
             if media_path and media_type in ("image", "audio"):
@@ -286,6 +291,7 @@ async def process_incoming_message(
                         caption=caption,
                         max_length=bot_settings.max_reply_length,
                         language=bot_settings.language,
+                        knowledge_context=knowledge_context,
                     )
                 else:
                     # Fallback to text reply if media couldn't be read
@@ -295,6 +301,7 @@ async def process_incoming_message(
                         user_message=content or "[Media message]",
                         max_length=bot_settings.max_reply_length,
                         language=bot_settings.language,
+                        knowledge_context=knowledge_context,
                     )
             else:
                 reply = await gemini_service.generate_reply(
@@ -303,6 +310,7 @@ async def process_incoming_message(
                     user_message=content,
                     max_length=bot_settings.max_reply_length,
                     language=bot_settings.language,
+                    knowledge_context=knowledge_context,
                 )
         except Exception as e:
             logger.error(f"Gemini error: {e}")
@@ -318,6 +326,28 @@ async def process_incoming_message(
             logger.warning("Gemini returned empty reply")
             return None
 
+        # Check if Voice Note output is requested and enabled
+        audio_path = None
+        if getattr(bot_settings, "voice_reply_enabled", False):
+            should_voice = (media_type == "audio") or (getattr(bot_settings, "voice_reply_mode", "audio_only") == "always")
+            if should_voice:
+                try:
+                    import os
+                    import uuid
+                    from app.config import settings
+                    tts_dir = os.path.join(settings.media_dir, account_id, "tts")
+                    os.makedirs(tts_dir, exist_ok=True)
+                    target_audio = os.path.join(tts_dir, f"voice_{uuid.uuid4().hex[:8]}.ogg")
+                    voice_name = getattr(bot_settings, "voice_name", "en-IN-NeerjaNeural")
+                    audio_path = await generate_voice_note(
+                        text=reply,
+                        voice_name=voice_name,
+                        output_path=target_audio,
+                    )
+                except Exception as tts_err:
+                    logger.error(f"Voice note generation failed: {tts_err}")
+                    audio_path = None
+
         # Save AI reply
         ai_msg = save_message(
             db=db,
@@ -326,6 +356,8 @@ async def process_incoming_message(
             direction=MessageDirection.outgoing,
             ai_generated=True,
             status=MessageStatus.pending,
+            message_type="audio" if audio_path else "text",
+            media_path=audio_path,
         )
 
         # Emit AI reply completed event
@@ -339,12 +371,13 @@ async def process_incoming_message(
                     "content": reply,
                     "ai_generated": True,
                     "direction": "outgoing",
+                    "message_type": "audio" if audio_path else "text",
                     "created_at": ai_msg.created_at.isoformat(),
                 },
                 account.user_id
             )
 
-        return reply
+        return {"reply": reply, "audio_path": audio_path}
 
     except Exception as e:
         logger.error(f"Error processing message: {e}", exc_info=True)

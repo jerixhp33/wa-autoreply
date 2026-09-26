@@ -69,6 +69,7 @@ from app.api.bot import router as bot_router
 from app.api.api_keys import router as api_keys_router
 from app.api.dashboard import router as dashboard_router
 from app.api.public import router as public_router
+from app.api.documents import router as documents_router
 
 app.include_router(auth_router)
 app.include_router(whatsapp_router)
@@ -78,6 +79,7 @@ app.include_router(bot_router)
 app.include_router(api_keys_router)
 app.include_router(dashboard_router)
 app.include_router(public_router)
+app.include_router(documents_router)
 
 
 @app.websocket("/ws/{token}")

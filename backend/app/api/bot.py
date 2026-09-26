@@ -83,6 +83,12 @@ async def update_bot_settings(
         bot_settings.max_reply_length = data.max_reply_length
     if data.respond_to_groups is not None:
         bot_settings.respond_to_groups = data.respond_to_groups
+    if data.voice_reply_enabled is not None:
+        bot_settings.voice_reply_enabled = data.voice_reply_enabled
+    if data.voice_name is not None:
+        bot_settings.voice_name = data.voice_name
+    if data.voice_reply_mode is not None:
+        bot_settings.voice_reply_mode = data.voice_reply_mode
 
     db.commit()
     db.refresh(bot_settings)

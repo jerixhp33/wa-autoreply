@@ -314,6 +314,50 @@ class WhatsAppSession:
             logger.error(f"Failed to send message to {phone}: {e}")
             raise
 
+    def send_audio(self, phone: str, audio_path: str, is_ptt: bool = True) -> bool:
+        """Send an audio/voice note message synchronously."""
+        if not self.client or not self.connected:
+            raise RuntimeError(f"WhatsApp not connected for account {self.account_id}")
+
+        try:
+            from neonize.client import build_jid
+
+            jid = build_jid(phone, "s.whatsapp.net")
+            try:
+                lid_jid = self.client.get_lid_from_pn(jid)
+                if lid_jid and lid_jid.User:
+                    jid = lid_jid
+            except Exception:
+                pass
+
+            if hasattr(self.client, "build_audio_message"):
+                msg = self.client.build_audio_message(audio_path, ptt=is_ptt)
+                self.client.send_message(jid, msg)
+            elif hasattr(self.client, "send_audio"):
+                self.client.send_audio(jid, audio_path)
+            else:
+                with open(audio_path, "rb") as f:
+                    audio_bytes = f.read()
+                upload_res = self.client.upload(audio_bytes)
+                from neonize.proto.Neonize_pb2 import Message, AudioMessage
+                audio_msg = AudioMessage(
+                    url=upload_res.url,
+                    mimetype="audio/ogg; codecs=opus",
+                    fileSha256=upload_res.fileSha256,
+                    fileLength=len(audio_bytes),
+                    mediaKey=upload_res.mediaKey,
+                    fileEncSha256=upload_res.fileEncSha256,
+                    directPath=upload_res.directPath,
+                    ptt=is_ptt,
+                )
+                self.client.send_message(jid, Message(audioMessage=audio_msg))
+
+            logger.info(f"Voice note sent to {phone}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send voice note to {phone}: {e}")
+            raise
+
     def stop(self):
         """Stop the session."""
         self._stopped = True
@@ -401,6 +445,14 @@ class NeonizeManager:
         # Run blocking send in executor
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, session.send_message, phone, text)
+
+    async def send_audio(self, account_id: str, phone: str, audio_path: str, is_ptt: bool = True) -> bool:
+        """Send a voice note from a specific account (async wrapper)."""
+        session = self.sessions.get(account_id)
+        if not session:
+            raise RuntimeError(f"No active session for account {account_id}")
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, session.send_audio, phone, audio_path, is_ptt)
 
     def get_session(self, account_id: str) -> Optional[WhatsAppSession]:
         return self.sessions.get(account_id)

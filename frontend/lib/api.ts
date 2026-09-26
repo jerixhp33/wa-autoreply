@@ -114,3 +114,29 @@ export const apiKeysApi = {
 export const dashboardApi = {
   getStats: () => api.get('/api/dashboard/stats'),
 };
+
+// ─── Documents (Knowledge Base) ───────────────────────────────────────────────
+
+export const documentsApi = {
+  list: (accountId: string) =>
+    api.get('/api/documents', { params: { account_id: accountId } }),
+
+  get: (documentId: string) =>
+    api.get(`/api/documents/${documentId}`),
+
+  upload: (accountId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('account_id', accountId);
+    formData.append('file', file);
+    return api.post('/api/documents/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+
+  toggle: (documentId: string) =>
+    api.patch(`/api/documents/${documentId}/toggle`),
+
+  delete: (documentId: string) =>
+    api.delete(`/api/documents/${documentId}`),
+};
+

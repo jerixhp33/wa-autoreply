@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Bot, Save, Loader2, Settings2, Sun, Moon } from 'lucide-react';
+import { Bot, Save, Loader2, Settings2, Sun, Moon, Mic } from 'lucide-react';
 import { whatsappApi, botApi } from '@/lib/api';
 import { WhatsAppAccount, BotSettings } from '@/types';
 import { toast } from 'sonner';
@@ -35,6 +35,9 @@ export default function SettingsPage() {
     language: 'automatic',
     max_reply_length: 500,
     respond_to_groups: false,
+    voice_reply_enabled: false,
+    voice_name: 'en-IN-NeerjaNeural',
+    voice_reply_mode: 'audio_only',
   });
 
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -71,6 +74,9 @@ export default function SettingsPage() {
           language: res.data.language,
           max_reply_length: res.data.max_reply_length,
           respond_to_groups: res.data.respond_to_groups,
+          voice_reply_enabled: res.data.voice_reply_enabled ?? false,
+          voice_name: res.data.voice_name ?? 'en-IN-NeerjaNeural',
+          voice_reply_mode: res.data.voice_reply_mode ?? 'audio_only',
         });
       } catch (err) {
         console.error('Failed to load settings', err);
@@ -235,6 +241,62 @@ export default function SettingsPage() {
               >
                 <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${form.respond_to_groups ? 'translate-x-5' : 'translate-x-0.5'}`} />
               </button>
+            </div>
+
+            {/* AI Voice Note Replies (TTS) */}
+            <div className="rounded-xl border border-border/80 bg-muted/20 p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold flex items-center gap-2">
+                    <Mic className="h-4 w-4 text-whatsapp" /> AI Voice Note Replies (TTS)
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Reply to customers with high-quality natural voice notes on WhatsApp
+                  </p>
+                </div>
+                <button
+                  onClick={() => setForm(f => ({ ...f, voice_reply_enabled: !f.voice_reply_enabled }))}
+                  className={`relative h-6 w-11 rounded-full transition-colors ${form.voice_reply_enabled ? 'bg-whatsapp' : 'bg-muted'}`}
+                >
+                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${form.voice_reply_enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+
+              {form.voice_reply_enabled && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-border/50">
+                  {/* Voice Accent Selector */}
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5">Voice Accent & Persona</label>
+                    <select
+                      value={form.voice_name}
+                      onChange={(e) => setForm(f => ({ ...f, voice_name: e.target.value }))}
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-whatsapp"
+                    >
+                      <option value="en-IN-NeerjaNeural">🇮🇳 Indian English (Female - Neerja)</option>
+                      <option value="en-IN-PrabhatNeural">🇮🇳 Indian English (Male - Prabhat)</option>
+                      <option value="en-US-JennyNeural">🇺🇸 US English (Female - Jenny)</option>
+                      <option value="en-US-GuyNeural">🇺🇸 US English (Male - Guy)</option>
+                      <option value="ta-IN-PallaviNeural">🇮🇳 Tamil (Female - Pallavi)</option>
+                      <option value="ta-IN-ValluvarNeural">🇮🇳 Tamil (Male - Valluvar)</option>
+                      <option value="hi-IN-SwaraNeural">🇮🇳 Hindi (Female - Swara)</option>
+                      <option value="hi-IN-MadhurNeural">🇮🇳 Hindi (Male - Madhur)</option>
+                    </select>
+                  </div>
+
+                  {/* Voice Trigger Mode */}
+                  <div>
+                    <label className="block text-xs font-medium mb-1.5">When to send voice notes</label>
+                    <select
+                      value={form.voice_reply_mode}
+                      onChange={(e) => setForm(f => ({ ...f, voice_reply_mode: e.target.value as any }))}
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-whatsapp"
+                    >
+                      <option value="audio_only">Only when customer sends a voice note</option>
+                      <option value="always">Always reply with voice note</option>
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* System prompt */}

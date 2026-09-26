@@ -138,7 +138,7 @@ async def handle_message(
     async def ws_callback(event: str, data: dict, user_id: str):
         await ws_manager.send_to_user(user_id, event, data)
 
-    reply = await process_incoming_message(
+    res = await process_incoming_message(
         account_id=account_id,
         sender=sender,
         content=content,
@@ -151,12 +151,27 @@ async def handle_message(
         caption=caption,
     )
 
-    if reply:
-        try:
-            await neonize_manager.send_message(account_id, sender, reply)
-            logger.info(f"AI reply sent to {sender}")
-        except Exception as e:
-            logger.error(f"Failed to send AI reply: {e}")
+    if res:
+        reply_text = res.get("reply") if isinstance(res, dict) else res
+        audio_path = res.get("audio_path") if isinstance(res, dict) else None
+
+        if audio_path:
+            try:
+                await neonize_manager.send_audio(account_id, sender, audio_path, is_ptt=True)
+                logger.info(f"AI voice note sent to {sender}")
+            except Exception as e:
+                logger.warning(f"Failed to send voice note, falling back to text: {e}")
+                if reply_text:
+                    try:
+                        await neonize_manager.send_message(account_id, sender, reply_text)
+                    except Exception as send_err:
+                        logger.error(f"Failed to send text fallback: {send_err}")
+        elif reply_text:
+            try:
+                await neonize_manager.send_message(account_id, sender, reply_text)
+                logger.info(f"AI reply sent to {sender}")
+            except Exception as e:
+                logger.error(f"Failed to send AI reply: {e}")
 
 
 async def start_whatsapp_session(account_id: str):

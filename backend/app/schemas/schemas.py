@@ -174,6 +174,9 @@ class BotSettingsResponse(BaseModel):
     language: str
     max_reply_length: int
     respond_to_groups: bool
+    voice_reply_enabled: bool = False
+    voice_name: str = "en-IN-NeerjaNeural"
+    voice_reply_mode: str = "audio_only"
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -187,6 +190,39 @@ class BotSettingsUpdate(BaseModel):
     language: Optional[str] = None
     max_reply_length: Optional[int] = None
     respond_to_groups: Optional[bool] = None
+    voice_reply_enabled: Optional[bool] = None
+    voice_name: Optional[str] = None
+    voice_reply_mode: Optional[str] = None
+
+
+# ─── Documents (Knowledge Base) ───────────────────────────────────────────────
+
+class DocumentResponse(BaseModel):
+    id: str
+    whatsapp_account_id: str
+    filename: str
+    file_type: str
+    file_size: int
+    is_active: bool
+    created_at: datetime
+    extracted_text_preview: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class DocumentDetailResponse(BaseModel):
+    id: str
+    whatsapp_account_id: str
+    filename: str
+    file_type: str
+    file_size: int
+    extracted_text: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ─── API Keys ─────────────────────────────────────────────────────────────────
