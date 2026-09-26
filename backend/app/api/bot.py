@@ -134,7 +134,6 @@ async def update_bot_settings(
 @router.post("/tts/preview")
 async def preview_voice(
     data: VoicePreviewRequest,
-    current_user: User = Depends(get_current_user),
 ):
     """Generate audio preview bytes for testing a voice directly in the browser."""
     audio_bytes = await generate_voice_preview(
