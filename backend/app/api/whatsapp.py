@@ -277,7 +277,14 @@ async def list_accounts(
         .all()
     )
     for a in accounts:
-        if a.status == AccountStatus.connected and not neonize_manager.is_connected(a.id):
+        is_conn = neonize_manager.is_connected(a.id)
+        if is_conn and a.status != AccountStatus.connected:
+            a.status = AccountStatus.connected
+            session = neonize_manager.get_session(a.id)
+            if session and session.phone_number:
+                a.phone_number = session.phone_number
+            db.commit()
+        elif not is_conn and a.status == AccountStatus.connected:
             a.status = AccountStatus.disconnected
             db.commit()
     return [WhatsAppAccountResponse.model_validate(a) for a in accounts]
@@ -295,9 +302,18 @@ async def get_account(
     ).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    if account.status == AccountStatus.connected and not neonize_manager.is_connected(account.id):
+
+    is_conn = neonize_manager.is_connected(account.id)
+    if is_conn and account.status != AccountStatus.connected:
+        account.status = AccountStatus.connected
+        session = neonize_manager.get_session(account.id)
+        if session and session.phone_number:
+            account.phone_number = session.phone_number
+        db.commit()
+    elif not is_conn and account.status == AccountStatus.connected:
         account.status = AccountStatus.disconnected
         db.commit()
+
     return WhatsAppAccountResponse.model_validate(account)
 
 
@@ -314,8 +330,14 @@ async def get_qr(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
+    is_conn = neonize_manager.is_connected(account.id)
+    if is_conn and account.status != AccountStatus.connected:
+        account.status = AccountStatus.connected
+        account.qr_code = None
+        db.commit()
+
     return QRResponse(
-        qr_code=account.qr_code,
+        qr_code=account.qr_code if not is_conn else None,
         status=account.status
     )
 

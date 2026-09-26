@@ -30,15 +30,19 @@ function QRModal({
         const res = await whatsappApi.getQR(account.id);
         setQrData(res.data.qr_code);
         setStatus(res.data.status);
+        if (res.data.status === 'connected') {
+          toast.success('WhatsApp connected successfully!');
+          setTimeout(onClose, 1200);
+        }
       } catch (err) {
         console.error('Failed to load QR', err);
       }
     };
 
     loadQR();
-    const interval = setInterval(loadQR, 5000);
+    const interval = setInterval(loadQR, 3000);
     return () => clearInterval(interval);
-  }, [account.id]);
+  }, [account.id, onClose]);
 
   useEffect(() => {
     const unsub1 = on('qr_updated', (data: any) => {
@@ -292,6 +296,17 @@ export default function WhatsAppPage() {
     const unsub2 = on('account_disconnected', () => loadAccounts());
     return () => { unsub1(); unsub2(); };
   }, [on, loadAccounts]);
+
+  useEffect(() => {
+    const hasConnecting = accounts.some(a => a.status === 'connecting');
+    if (!hasConnecting) return;
+
+    const interval = setInterval(() => {
+      loadAccounts();
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [accounts, loadAccounts]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
