@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { Bot, Save, Loader2, Settings2, Sun, Moon, Mic } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Bot, Save, Loader2, Settings2, Sun, Moon, Mic, Play, Square, Volume2, Sparkles } from 'lucide-react';
 import { whatsappApi, botApi } from '@/lib/api';
 import { WhatsAppAccount, BotSettings } from '@/types';
 import { toast } from 'sonner';
@@ -21,6 +21,76 @@ Reply in the same language as the customer when possible.
 
 Make the response suitable for WhatsApp.`;
 
+const PERSONA_PRESETS = [
+  {
+    id: 'vibe_tamil',
+    name: '🌟 Vibe AI (Tamil & Tanglish Buddy)',
+    badge: 'Popular',
+    desc: 'Fluent spoken Tamil (பேச்சுத் தமிழ்) + modern Tanglish friend. Charismatic, natural, and authentic.',
+    prompt: `You are a charismatic, super-friendly, and helpful AI buddy chatting on WhatsApp.
+
+## 🗣️ LANGUAGE & SLANG MASTERY
+- Flawlessly understand Tamil (தமிழ்), Tanglish (Tamil written in English letters like "machan", "epdi irukka", "enna pandra", "romba nandri"), and English.
+- Always mirror the user's language style:
+  • If user speaks/texts in Tanglish: reply in smooth, natural Tanglish with cool friendly emojis.
+  • If user speaks/texts in Tamil script: reply in natural spoken Tamil.
+  • If user speaks/texts in English: reply in relaxed, conversational English.
+- Use natural spoken colloquial Tamil (பேச்சுத் தமிழ்): e.g., "சொல்லுங்க", "எப்படி இருக்கீங்க?", "கண்டிப்பா", "அப்டியா", "நோ பிராப்ளம்", "சூப்பர்". Avoid stiff or bookish formal phrasing.
+
+## 🎙️ VOICE NOTE SPEECH RULES
+- When generating voice notes, keep the speech smooth, relaxed, and easy to understand.
+- Never pronounce English letters mechanically for Tamil words. The speech track uses Tamil script so the native Tamil neural voice speaks authentically.
+- Zero asterisks, zero markdown, zero bullet points in the speech track.
+- Never announce the clock time unless explicitly asked.
+
+## ⚡ BEHAVIOR & ETIQUETTE
+- Sound like a real, thoughtful human talking naturally.
+- Keep responses concise, warm, and engaging.
+- Never hallucinate business facts or invent policies.`,
+    recommendedVoice: 'ta-IN-ValluvarNeural',
+  },
+  {
+    id: 'pro_business',
+    name: '💼 Professional Business Assistant',
+    badge: 'Business',
+    desc: 'Courteous, polite, and structured assistant for sales, bookings, and customer inquiries.',
+    prompt: `You are an elite, highly professional WhatsApp customer support assistant for our business.
+
+## 🎯 CORE PRINCIPLES
+1. Always maintain a polite, respectful, and reassuring tone (மரியாதையான அணுகுமுறை).
+2. Answer strictly using official verified business knowledge base information. Never invent prices, discounts, delivery times, or policies.
+3. If an answer is not in the knowledge base, politely inform the customer and offer to connect them with a human specialist.
+
+## 🌐 LANGUAGE CAPABILITIES
+- Support English, Tamil (தமிழ்), and Tanglish seamlessly.
+- For Tamil customers, communicate with warm professional respect: "வணக்கம்! எங்கள் நிறுவனத்திற்கு தங்களை வரவேற்கிறோம். தங்களுக்கு எவ்வாறு உதவ முடியும்?".
+- Keep answers clear, well-structured, and easy to read on mobile screens.
+
+## 🎙️ VOICE NOTE PROTOCOL
+- Deliver clear, calm, and articulate voice responses.
+- Pace the speech naturally with clear pronunciation and courteous phrasing.
+- Zero markdown syntax or emoji names in spoken audio.`,
+    recommendedVoice: 'ta-IN-PallaviNeural',
+  },
+  {
+    id: 'tech_mentor',
+    name: '⚡ Tech & Code Mentor',
+    badge: 'Developer',
+    desc: 'Senior engineer buddy who explains code, logic, and debugging in Tamil & English.',
+    prompt: `You are a brilliant and practical senior engineer and tech mentor assisting developers on WhatsApp.
+
+## 🚀 EXPERTISE & STYLE
+- Explain complex programming concepts, bugs, system architecture, and logic simply and practically.
+- Blend Tamil and English smoothly when communicating with Tamil developers (e.g. "API endpoint-la authentication header miss aagudhu, adha check pannunga").
+- Provide clean, minimal, production-ready code snippets when requested.
+
+## 🎙️ VOICE NOTES
+- Explain code flow and debugging steps logically and clearly, as if pairing together in a coffee shop.
+- Avoid reading out long syntax or brackets in voice notes; explain the high-level logic in speech and provide exact code in text.`,
+    recommendedVoice: 'en-IN-PrabhatNeural',
+  },
+];
+
 export default function SettingsPage() {
   const [accounts, setAccounts] = useState<WhatsAppAccount[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
@@ -36,12 +106,70 @@ export default function SettingsPage() {
     max_reply_length: 500,
     respond_to_groups: false,
     voice_reply_enabled: false,
-    voice_name: 'en-IN-NeerjaNeural',
+    voice_name: 'en-IN-PrabhatNeural',
     voice_reply_mode: 'audio_only',
     groq_api_key: '',
   });
 
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Audio Preview State
+  const [playingVoice, setPlayingVoice] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const stopPreview = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setPlayingVoice(null);
+    setPreviewLoading(false);
+  };
+
+  const handlePreviewVoice = async (voiceName: string) => {
+    if (playingVoice === voiceName) {
+      stopPreview();
+      return;
+    }
+    stopPreview();
+    setPreviewLoading(true);
+    setPlayingVoice(voiceName);
+
+    try {
+      const res = await botApi.previewVoice(voiceName);
+      const audioBlob = new Blob([res.data], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      audio.onended = () => {
+        setPlayingVoice(null);
+        audioRef.current = null;
+      };
+      audio.onerror = () => {
+        toast.error('Failed to play voice sample');
+        stopPreview();
+      };
+
+      await audio.play();
+    } catch (err) {
+      console.error('Failed to preview voice', err);
+      toast.error('Voice preview failed. Please try again.');
+      stopPreview();
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+    };
+  }, []);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -76,7 +204,7 @@ export default function SettingsPage() {
           max_reply_length: res.data.max_reply_length,
           respond_to_groups: res.data.respond_to_groups,
           voice_reply_enabled: res.data.voice_reply_enabled ?? false,
-          voice_name: res.data.voice_name ?? 'en-IN-NeerjaNeural',
+          voice_name: res.data.voice_name ?? 'en-IN-PrabhatNeural',
           voice_reply_mode: res.data.voice_reply_mode ?? 'audio_only',
           groq_api_key: res.data.groq_api_key ?? '',
         });
@@ -102,6 +230,15 @@ export default function SettingsPage() {
     }
   };
 
+  const applyPreset = (preset: typeof PERSONA_PRESETS[0]) => {
+    setForm(f => ({
+      ...f,
+      system_prompt: preset.prompt,
+      voice_name: preset.recommendedVoice,
+    }));
+    toast.success(`Applied preset: ${preset.name}`);
+  };
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -111,10 +248,10 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-8 max-w-2xl">
+    <div className="p-8 max-w-3xl">
       <div className="mb-8">
         <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground mt-1">Configure your AI bot behavior</p>
+        <p className="text-muted-foreground mt-1">Configure your AI bot behavior, persona, and voice synthesis</p>
       </div>
 
       {/* Appearance */}
@@ -203,11 +340,10 @@ export default function SettingsPage() {
                 onChange={(e) => setForm(f => ({ ...f, language: e.target.value }))}
                 className="w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm outline-none focus:border-primary"
               >
-                <option value="automatic">Automatic (match customer)</option>
+                <option value="automatic">Automatic (match customer language)</option>
+                <option value="tamil">Tamil / Tanglish (தமிழ்)</option>
                 <option value="english">English</option>
-                <option value="tamil">Tamil</option>
-                <option value="tanglish">Tanglish</option>
-                <option value="hindi">Hindi</option>
+                <option value="hindi">Hindi (हिंदी)</option>
                 <option value="spanish">Spanish</option>
                 <option value="french">French</option>
               </select>
@@ -248,14 +384,14 @@ export default function SettingsPage() {
             </div>
 
             {/* AI Voice Note Replies (TTS) */}
-            <div className="rounded-xl border border-border/80 bg-muted/20 p-4 space-y-4">
+            <div className="rounded-xl border border-border/80 bg-muted/20 p-5 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold flex items-center gap-2">
-                    <Mic className="h-4 w-4 text-whatsapp" /> AI Voice Note Replies (TTS)
+                    <Mic className="h-4 w-4 text-whatsapp" /> AI Voice Note Replies (Ultra TTS Engine)
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Reply to customers with high-quality natural voice notes on WhatsApp
+                    Synthesizes 24kHz HD Wideband Opus audio with native Tamil and English phonetics
                   </p>
                 </div>
                 <button
@@ -267,30 +403,57 @@ export default function SettingsPage() {
               </div>
 
               {form.voice_reply_enabled && (
-                <div className="space-y-4 pt-2 border-t border-border/50">
+                <div className="space-y-4 pt-3 border-t border-border/50">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Voice Accent Selector */}
+                    {/* Voice Accent Selector with Live Preview */}
                     <div>
-                      <label className="block text-xs font-medium mb-1.5">Voice Accent & Persona</label>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-medium">Voice Accent & Model</label>
+                        <button
+                          type="button"
+                          onClick={() => handlePreviewVoice(form.voice_name)}
+                          disabled={previewLoading && playingVoice !== form.voice_name}
+                          className="flex items-center gap-1 text-[11px] font-semibold text-whatsapp hover:text-whatsapp-dark bg-whatsapp/10 hover:bg-whatsapp/20 px-2 py-0.5 rounded transition-colors"
+                        >
+                          {previewLoading && playingVoice === form.voice_name ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : playingVoice === form.voice_name ? (
+                            <>
+                              <Square className="h-3 w-3 fill-current text-red-500" />
+                              <span className="text-red-500">Stop</span>
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 className="h-3 w-3" />
+                              <span>▶️ Listen</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
                       <select
                         value={form.voice_name}
-                        onChange={(e) => setForm(f => ({ ...f, voice_name: e.target.value }))}
+                        onChange={(e) => {
+                          stopPreview();
+                          setForm(f => ({ ...f, voice_name: e.target.value }));
+                        }}
                         className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-whatsapp"
                       >
-                        <optgroup label="🎙️ High-Quality Studio Voices (Tamil, Hindi, English)">
-                          <option value="ta-IN-PallaviNeural">🇮🇳 Tamil (Female - Pallavi)</option>
-                          <option value="ta-IN-ValluvarNeural">🇮🇳 Tamil (Male - Valluvar)</option>
-                          <option value="en-IN-NeerjaNeural">🇮🇳 Indian English (Female - Neerja)</option>
-                          <option value="en-IN-PrabhatNeural">🇮🇳 Indian English (Male - Prabhat)</option>
-                          <option value="hi-IN-SwaraNeural">🇮🇳 Hindi (Female - Swara)</option>
-                          <option value="hi-IN-MadhurNeural">🇮🇳 Hindi (Male - Madhur)</option>
-                          <option value="en-US-JennyNeural">🇺🇸 US English (Female - Jenny)</option>
-                          <option value="en-US-GuyNeural">🇺🇸 US English (Male - Guy)</option>
+                        <optgroup label="🇮🇳 Native Tamil Voices (Authentic Spoken Tamil)">
+                          <option value="ta-IN-ValluvarNeural">🇮🇳 Tamil Male — Valluvar (Smooth & Authentic)</option>
+                          <option value="ta-IN-PallaviNeural">🇮🇳 Tamil Female — Pallavi (Expressive & Warm)</option>
                         </optgroup>
-                        <optgroup label="⚡ Alternative Voices">
-                          <option value="Aria-PlayAI">Aria (Expressive Female)</option>
-                          <option value="Fritz-PlayAI">Fritz (Dynamic Male)</option>
-                          <option value="Dexter-PlayAI">Dexter (Deep Male)</option>
+                        <optgroup label="🇮🇳 Indian English (Fluent & Natural)">
+                          <option value="en-IN-PrabhatNeural">🇮🇳 Indian English Male — Prabhat (Charismatic)</option>
+                          <option value="en-IN-NeerjaNeural">🇮🇳 Indian English Female — Neerja (Crisp)</option>
+                        </optgroup>
+                        <optgroup label="🇮🇳 Hindi Voices">
+                          <option value="hi-IN-MadhurNeural">🇮🇳 Hindi Male — Madhur</option>
+                          <option value="hi-IN-SwaraNeural">🇮🇳 Hindi Female — Swara</option>
+                        </optgroup>
+                        <optgroup label="🇺🇸 Global English">
+                          <option value="en-US-JennyNeural">🇺🇸 US English Female — Jenny</option>
+                          <option value="en-US-GuyNeural">🇺🇸 US English Male — Guy</option>
                         </optgroup>
                       </select>
                     </div>
@@ -310,9 +473,9 @@ export default function SettingsPage() {
                   </div>
 
                   {/* Groq API Key Input */}
-                  <div className="rounded-lg bg-background/50 border border-border/60 p-3">
+                  <div className="rounded-lg bg-background/60 border border-border/60 p-3">
                     <label className="block text-xs font-medium mb-1">
-                      Groq API Key <span className="text-muted-foreground font-normal">(Optional — enables ~150ms Whisper audio transcription & PlayAI studio TTS)</span>
+                      Groq API Key <span className="text-muted-foreground font-normal">(Enables ~150ms ultra-fast Whisper audio transcription)</span>
                     </label>
                     <input
                       type="password"
@@ -322,11 +485,49 @@ export default function SettingsPage() {
                       className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-whatsapp font-mono"
                     />
                     <p className="text-[11px] text-muted-foreground mt-1">
-                      Get a free key from <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="text-whatsapp underline font-medium">console.groq.com</a>. With Groq, incoming voice notes in Tamil, Hindi, or English are transcribed in ~150ms so AI understands and replies accurately.
+                      Get a free key from <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" className="text-whatsapp underline font-medium">console.groq.com</a>. Incoming WhatsApp voice notes in Tamil or English are transcribed in 150ms so Gemini replies instantly.
                     </p>
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Persona Presets */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-semibold flex items-center gap-1.5">
+                  <Sparkles className="h-4 w-4 text-amber-500" /> Persona Presets
+                </label>
+                <span className="text-xs text-muted-foreground">Click a preset to apply full optimized prompt & voice</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {PERSONA_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => applyPreset(preset)}
+                    className="text-left p-3.5 rounded-xl border border-border/70 hover:border-whatsapp/80 bg-background/50 hover:bg-whatsapp/5 transition-all group flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs font-bold group-hover:text-whatsapp transition-colors line-clamp-1">
+                          {preset.name}
+                        </span>
+                        <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground font-medium">
+                          {preset.badge}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                        {preset.desc}
+                      </p>
+                    </div>
+                    <span className="mt-2 text-[10px] text-whatsapp font-semibold group-hover:underline">
+                      Apply Preset →
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* System prompt */}
@@ -343,11 +544,11 @@ export default function SettingsPage() {
               <textarea
                 value={form.system_prompt}
                 onChange={(e) => setForm(f => ({ ...f, system_prompt: e.target.value }))}
-                rows={10}
-                className="w-full rounded-lg border border-input bg-background px-4 py-3 text-sm outline-none focus:border-primary font-mono resize-y"
+                rows={12}
+                className="w-full rounded-lg border border-input bg-background px-4 py-3 text-sm outline-none focus:border-primary font-mono resize-y leading-relaxed"
               />
               <p className="text-xs text-muted-foreground mt-1">
-                This is the AI's personality and behavior instructions.
+                Customize the AI's personality, colloquial slang, and business instructions.
               </p>
             </div>
 

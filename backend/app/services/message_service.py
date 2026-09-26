@@ -13,7 +13,7 @@ from app.models.models import (
     WhatsAppAccount, Contact, Conversation, Message, BotSettings,
     MessageDirection, MessageStatus, AccountStatus
 )
-from app.services.gemini_service import gemini_service
+from app.services.gemini_service import gemini_service, parse_dual_track_reply
 from app.database.database import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -314,6 +314,7 @@ async def process_incoming_message(
                     max_length=bot_settings.max_reply_length,
                     language=bot_settings.language,
                     knowledge_context=knowledge_context,
+                    is_voice_output=voice_active,
                 )
             elif media_path and media_type in ("image", "audio"):
                 # Read media bytes for multimodal AI processing
@@ -337,6 +338,7 @@ async def process_incoming_message(
                             max_length=bot_settings.max_reply_length,
                             language=bot_settings.language,
                             knowledge_context=knowledge_context,
+                            is_voice_output=voice_active,
                         )
                     except Exception as mm_err:
                         logger.warning(f"Multimodal media processing failed: {mm_err}, falling back to text prompt")
@@ -348,6 +350,7 @@ async def process_incoming_message(
                             max_length=bot_settings.max_reply_length,
                             language=bot_settings.language,
                             knowledge_context=knowledge_context,
+                            is_voice_output=voice_active,
                         )
                 else:
                     # Fallback to text reply if media couldn't be read
@@ -359,6 +362,7 @@ async def process_incoming_message(
                         max_length=bot_settings.max_reply_length,
                         language=bot_settings.language,
                         knowledge_context=knowledge_context,
+                        is_voice_output=voice_active,
                     )
             else:
                 reply = await gemini_service.generate_reply(
@@ -368,6 +372,7 @@ async def process_incoming_message(
                     max_length=bot_settings.max_reply_length,
                     language=bot_settings.language,
                     knowledge_context=knowledge_context,
+                    is_voice_output=voice_active,
                 )
         except Exception as e:
             logger.error(f"Gemini error: {e}")
@@ -390,6 +395,9 @@ async def process_incoming_message(
             logger.warning("Gemini returned empty reply")
             return None
 
+        # Parse dual-track reply: display_text (for screen) vs speech_text (for audio synthesis)
+        display_text, speech_text = parse_dual_track_reply(reply)
+
         # Check if Voice Note output is requested and enabled
         audio_path = None
         if getattr(bot_settings, "voice_reply_enabled", False):
@@ -402,9 +410,9 @@ async def process_incoming_message(
                     tts_dir = os.path.join(settings.media_dir, account_id, "tts")
                     os.makedirs(tts_dir, exist_ok=True)
                     target_audio = os.path.join(tts_dir, f"voice_{uuid.uuid4().hex[:8]}.ogg")
-                    voice_name = getattr(bot_settings, "voice_name", "en-IN-NeerjaNeural")
+                    voice_name = getattr(bot_settings, "voice_name", "en-IN-PrabhatNeural")
                     audio_path = await generate_voice_note(
-                        text=reply,
+                        text=speech_text,
                         voice_name=voice_name,
                         output_path=target_audio,
                         groq_api_key=getattr(bot_settings, "groq_api_key", None),
@@ -417,7 +425,7 @@ async def process_incoming_message(
         ai_msg = save_message(
             db=db,
             conversation_id=conv.id,
-            content=reply,
+            content=display_text,
             direction=MessageDirection.outgoing,
             ai_generated=True,
             status=MessageStatus.pending,
@@ -433,7 +441,7 @@ async def process_incoming_message(
                     "id": ai_msg.id,
                     "conversation_id": conv.id,
                     "account_id": account_id,
-                    "content": reply,
+                    "content": display_text,
                     "ai_generated": True,
                     "direction": "outgoing",
                     "message_type": "audio" if audio_path else "text",
@@ -443,7 +451,8 @@ async def process_incoming_message(
             )
 
         return {
-            "reply": reply,
+            "reply": display_text,
+            "speech_text": speech_text,
             "audio_path": audio_path,
             "conversation_id": conv.id,
             "message_id": ai_msg.id,

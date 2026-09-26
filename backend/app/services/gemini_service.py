@@ -26,6 +26,37 @@ def _is_retryable_error(error: Exception) -> bool:
     return any(code in error_str for code in retryable_codes)
 
 
+def parse_dual_track_reply(raw_text: str) -> tuple:
+    """
+    Parses dual-track response if present:
+    ---DISPLAY---
+    <display_text>
+    ---SPEECH---
+    <speech_text>
+    Returns (display_text, speech_text).
+    """
+    if not raw_text:
+        return ("", "")
+
+    raw = raw_text.strip()
+    import re
+    # Match various divider forms: ---SPEECH---, ### SPEECH, **SPEECH:**, etc.
+    speech_match = re.search(r'[-#* ]*---?\s*SPEECH\s*---?[-#* :]*', raw, re.IGNORECASE)
+    if speech_match:
+        display_part = raw[:speech_match.start()]
+        speech_part = raw[speech_match.end():]
+        display_part = re.sub(r'[-#* ]*---?\s*DISPLAY\s*---?[-#* :]*', '', display_part, flags=re.IGNORECASE).strip()
+        speech_part = speech_part.strip()
+        return (display_part or raw, speech_part or display_part)
+
+    display_match = re.search(r'[-#* ]*---?\s*DISPLAY\s*---?[-#* :]*', raw, re.IGNORECASE)
+    if display_match:
+        display_part = raw[display_match.end():].strip()
+        return (display_part, display_part)
+
+    return (raw, raw)
+
+
 class GeminiService:
     """Service for generating AI replies using Google Gemini."""
 
@@ -53,6 +84,7 @@ class GeminiService:
         max_length: int = 500,
         language: str = "automatic",
         knowledge_context: Optional[str] = None,
+        is_voice_output: bool = False,
     ) -> Optional[str]:
         """
         Generate an AI reply.
@@ -65,6 +97,7 @@ class GeminiService:
             max_length:           Character limit for the reply.
             language:             Language override (e.g. "english", "tamil", "automatic").
             knowledge_context:    Business knowledge base documents text.
+            is_voice_output:      Whether this reply will be synthesized into an audio voice note.
 
         Returns:
             The generated reply string, or None on failure.
@@ -107,16 +140,33 @@ class GeminiService:
         if max_length and max_length > 0:
             full_system += f"\n\nKeep your reply under {max_length} characters."
 
+        if is_voice_output:
+            full_system += (
+                "\n\n## 🎙️ DUAL-TRACK OUTPUT REQUIREMENT (CRITICAL)\n"
+                "Format your output with two sections using these exact headers:\n"
+                "---DISPLAY---\n"
+                "<The reply text shown on the WhatsApp chat screen. Can use casual Tanglish or English, line breaks, and aesthetic emojis.>\n"
+                "---SPEECH---\n"
+                "<The exact words to be spoken in the audio voice note. Follow these strict speech rules:\n"
+                "1. If the message is in Tamil or Tanglish, write this SPEECH section in fluent spoken TAMIL SCRIPT (தமிழ் எழுத்துக்கள்) so the native Tamil voice synthesizer pronounces every word smoothly and authentically (e.g. 'வணக்கம்! எப்படி இருக்கீங்க? சொல்லுங்க, நான் உங்களுக்கு எப்படி ஹெல்ப் பண்ணட்டும்?'). Transliterate common everyday loanwords into Tamil script (e.g. 'ஹெல்ப்', 'வாட்ஸ்அப்', 'மெசேஜ்', 'கண்டிப்பா'). NEVER use English Latin letters for Tamil words in the speech track.\n"
+                "2. If the message is in English, write in natural, conversational English.\n"
+                "3. Use spoken colloquial Tamil (பேச்சுத் தமிழ்) instead of bookish written Tamil.\n"
+                "4. ZERO emojis, ZERO asterisks (*), ZERO bullet points, ZERO unprompted clock announcements. Use natural commas and periods for breath pauses.>"
+            )
+
         # Build content list from conversation history
         # Neonize gives us role="incoming" (user) or "outgoing" (model)
         contents: List[types.Content] = []
 
         for msg in conversation_history:
             gemini_role = "user" if msg["role"] == "incoming" else "model"
+            content_text = msg.get("content", "") or ""
+            if gemini_role == "model":
+                content_text, _ = parse_dual_track_reply(content_text)
             contents.append(
                 types.Content(
                     role=gemini_role,
-                    parts=[types.Part(text=msg["content"])],
+                    parts=[types.Part(text=content_text)],
                 )
             )
 
@@ -190,6 +240,7 @@ class GeminiService:
         max_length: int = 500,
         language: str = "automatic",
         knowledge_context: Optional[str] = None,
+        is_voice_output: bool = False,
     ) -> Optional[str]:
         """
         Generate an AI reply for multimodal inputs (images, audio).
@@ -232,15 +283,32 @@ class GeminiService:
         if max_length and max_length > 0:
             full_system += f"\n\nKeep your reply under {max_length} characters."
 
+        if is_voice_output:
+            full_system += (
+                "\n\n## 🎙️ DUAL-TRACK OUTPUT REQUIREMENT (CRITICAL)\n"
+                "Format your output with two sections using these exact headers:\n"
+                "---DISPLAY---\n"
+                "<The reply text shown on the WhatsApp chat screen. Can use casual Tanglish or English, line breaks, and aesthetic emojis.>\n"
+                "---SPEECH---\n"
+                "<The exact words to be spoken in the audio voice note. Follow these strict speech rules:\n"
+                "1. If the message is in Tamil or Tanglish, write this SPEECH section in fluent spoken TAMIL SCRIPT (தமிழ் எழுத்துக்கள்) so the native Tamil voice synthesizer pronounces every word smoothly and authentically (e.g. 'வணக்கம்! எப்படி இருக்கீங்க? சொல்லுங்க, நான் உங்களுக்கு எப்படி ஹெல்ப் பண்ணட்டும்?'). Transliterate common everyday loanwords into Tamil script (e.g. 'ஹெல்ப்', 'வாட்ஸ்அப்', 'மெசேஜ்', 'கண்டிப்பா'). NEVER use English Latin letters for Tamil words in the speech track.\n"
+                "2. If the message is in English, write in natural, conversational English.\n"
+                "3. Use spoken colloquial Tamil (பேச்சுத் தமிழ்) instead of bookish written Tamil.\n"
+                "4. ZERO emojis, ZERO asterisks (*), ZERO bullet points, ZERO unprompted clock announcements. Use natural commas and periods for breath pauses.>"
+            )
+
         # Build content list from conversation history
         contents: List[types.Content] = []
 
         for msg in conversation_history:
             gemini_role = "user" if msg["role"] == "incoming" else "model"
+            content_text = msg.get("content", "") or ""
+            if gemini_role == "model":
+                content_text, _ = parse_dual_track_reply(content_text)
             contents.append(
                 types.Content(
                     role=gemini_role,
-                    parts=[types.Part(text=msg["content"])],
+                    parts=[types.Part(text=content_text)],
                 )
             )
 

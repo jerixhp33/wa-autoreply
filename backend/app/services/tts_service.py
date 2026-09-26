@@ -162,3 +162,48 @@ async def generate_voice_note(
     except Exception as e:
         logger.error(f"Failed to generate TTS audio: {e}", exc_info=True)
         return None
+
+
+async def generate_voice_preview(
+    voice_name: str,
+    sample_text: Optional[str] = None,
+) -> Optional[bytes]:
+    """
+    Generate an in-browser audio preview (MP3 bytes) for a selected voice.
+    """
+    import tempfile
+    import edge_tts
+
+    v = voice_name or DEFAULT_VOICE
+    if v in PLAYAI_FALLBACK_MAP:
+        v = PLAYAI_FALLBACK_MAP[v]
+
+    text = sample_text
+    if not text or not text.strip():
+        if "Valluvar" in v or "Pallavi" in v or "ta-IN" in v:
+            text = "வணக்கம்! நான் உங்க வாட்ஸ்அப் அசிஸ்டன்ட். உங்களுக்கு எப்படி உதவட்டும்?"
+        elif "hi-IN" in v:
+            text = "नमस्ते! मैं आपका व्हाट्सएप असिस्टेंट हूँ। मैं आपकी क्या मदद कर सकता हूँ?"
+        else:
+            text = "Hello there! I'm your WhatsApp AI assistant. How can I help you today?"
+
+    try:
+        fd, temp_mp3 = tempfile.mkstemp(suffix=".mp3")
+        os.close(fd)
+
+        communicate = edge_tts.Communicate(text, v, rate="-3%")
+        await communicate.save(temp_mp3)
+
+        with open(temp_mp3, "rb") as f:
+            audio_bytes = f.read()
+
+        try:
+            if os.path.exists(temp_mp3):
+                os.remove(temp_mp3)
+        except Exception:
+            pass
+
+        return audio_bytes
+    except Exception as e:
+        logger.error(f"Voice preview generation failed for {v}: {e}")
+        return None

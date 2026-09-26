@@ -99,6 +99,9 @@ export const botApi = {
 
   updateSettings: (accountId: string, data: Record<string, unknown>) =>
     api.put(`/api/bot/settings/${accountId}`, data),
+
+  previewVoice: (voice_name: string, sample_text?: string) =>
+    api.post('/api/bot/tts/preview', { voice_name, sample_text }, { responseType: 'blob' }),
 };
 
 // ─── API Keys ─────────────────────────────────────────────────────────────────

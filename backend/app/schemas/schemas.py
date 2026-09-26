@@ -197,6 +197,11 @@ class BotSettingsUpdate(BaseModel):
     groq_api_key: Optional[str] = None
 
 
+class VoicePreviewRequest(BaseModel):
+    voice_name: str
+    sample_text: Optional[str] = None
+
+
 # ─── Documents (Knowledge Base) ───────────────────────────────────────────────
 
 class DocumentResponse(BaseModel):
