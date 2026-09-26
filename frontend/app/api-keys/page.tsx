@@ -69,16 +69,11 @@ export default function ApiKeysPage() {
   const [newName, setNewName] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null);
-  const [accountAccountId, setAccountAccountId] = useState<string | null>(null);
 
   const load = async () => {
     try {
       const res = await apiKeysApi.list();
       setKeys(res.data);
-      const accsRes = await whatsappApi.listAccounts();
-      if (accsRes.data && accsRes.data.length > 0) {
-        setAccountAccountId(accsRes.data[0].id);
-      }
     } catch (err) {
       console.error('Failed to load API keys', err);
     } finally {
@@ -187,7 +182,7 @@ export default function ApiKeysPage() {
           <p>curl -X POST https://wa-autoreply-a416.onrender.com/api/v1/messages/send \</p>
           <p className="pl-4">-H "Authorization: Bearer {newKey?.key || 'wha_live_xxx...'}" \</p>
           <p className="pl-4">-H "Content-Type: application/json" \</p>
-          <p className="pl-4">-d {'\'{"account_id": "' + (accountAccountId || 'YOUR_ACCOUNT_ID') + '", "phone": "919360490974", "message": "Hello!"}\''}</p>
+          <p className="pl-4">-d {'\'{"account_id": "YOUR_ACCOUNT_ID", "phone": "919876543210", "message": "Hello!"}\''}</p>
         </div>
         <div className="mt-3 text-xs text-muted-foreground bg-muted/40 p-3 rounded-lg border border-border/50 flex items-center justify-between">
           <span>💡 <strong>Need your Account ID?</strong> Go to <a href="/whatsapp" className="text-whatsapp font-medium hover:underline">WhatsApp Accounts</a> — each account card has a 1-click <strong>Copy ID</strong> button.</span>
