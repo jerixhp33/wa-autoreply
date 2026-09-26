@@ -5,7 +5,7 @@ import {
   Key, Plus, Trash2, Copy, Check, Eye, EyeOff,
   Loader2, AlertTriangle, Clock
 } from 'lucide-react';
-import { apiKeysApi, whatsappApi } from '@/lib/api';
+import { apiKeysApi } from '@/lib/api';
 import { ApiKey, ApiKeyCreated } from '@/types';
 import { formatDate, formatRelativeTime } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -57,6 +57,124 @@ function CreatedKeyBanner({ apiKey, onDismiss }: { apiKey: ApiKeyCreated; onDism
         >
           Dismiss
         </button>
+      </div>
+    </div>
+  );
+}
+
+function ApiDocsSection({ newKey }: { newKey: ApiKeyCreated | null }) {
+  const [tab, setTab] = useState<'curl' | 'js' | 'python'>('curl');
+  const [copied, setCopied] = useState(false);
+
+  const bearerKey = newKey?.key || 'wha_live_xxx...';
+
+  const curlCode = `curl -X POST https://wa-autoreply-a416.onrender.com/api/v1/messages/send \\
+  -H "Authorization: Bearer ${bearerKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "account_id": "YOUR_ACCOUNT_ID",
+    "phone": "YOUR_PHONE_NUMBER",
+    "message": "Hello from API! 🚀"
+  }'`;
+
+  const jsCode = `// Send message from Next.js / Node.js
+const response = await fetch("https://wa-autoreply-a416.onrender.com/api/v1/messages/send", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer ${bearerKey}",
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    account_id: "YOUR_ACCOUNT_ID",
+    phone: "YOUR_PHONE_NUMBER",
+    message: "Hello from API! 🚀"
+  })
+});
+
+const data = await response.json();
+console.log(data);`;
+
+  const pythonCode = `import requests
+
+url = "https://wa-autoreply-a416.onrender.com/api/v1/messages/send"
+headers = {
+    "Authorization": "Bearer ${bearerKey}",
+    "Content-Type": "application/json"
+}
+payload = {
+    "account_id": "YOUR_ACCOUNT_ID",
+    "phone": "YOUR_PHONE_NUMBER",
+    "message": "Hello from API! 🚀"
+}
+
+response = requests.post(url, json=payload, headers=headers)
+print(response.json())`;
+
+  const currentCode = tab === 'curl' ? curlCode : tab === 'js' ? jsCode : pythonCode;
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(currentCode);
+    setCopied(true);
+    toast.success('Code snippet copied!');
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 mb-6">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="font-semibold text-sm">Integration Guide & Examples</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">Send automated WhatsApp messages from your application</p>
+        </div>
+        <a href="/whatsapp" className="text-xs text-whatsapp hover:underline font-medium flex items-center gap-1">
+          Find Account ID →
+        </a>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center justify-between bg-muted/60 p-1 rounded-lg border border-border/50 mb-3">
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => setTab('curl')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'curl' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            cURL
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('js')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'js' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            JavaScript (Node / Next)
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('python')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'python' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            Python
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="flex items-center gap-1 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-background/80 transition-colors"
+        >
+          {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+          <span>{copied ? 'Copied' : 'Copy'}</span>
+        </button>
+      </div>
+
+      {/* Code Box */}
+      <div className="relative font-mono text-xs bg-muted/90 rounded-lg p-4 overflow-x-auto text-foreground leading-relaxed">
+        <pre>{currentCode}</pre>
+      </div>
+
+      {/* Info helper */}
+      <div className="mt-4 text-xs text-muted-foreground bg-muted/40 p-3 rounded-lg border border-border/50">
+        <span>💡 <strong>Quick Setup:</strong> Replace <code>YOUR_ACCOUNT_ID</code> with your Account ID from <a href="/whatsapp" className="text-whatsapp font-medium hover:underline">WhatsApp Accounts</a>, and <code>YOUR_PHONE_NUMBER</code> with the recipient's phone number (with country code, e.g. <code>919360490974</code>).</span>
       </div>
     </div>
   );
@@ -169,25 +287,8 @@ export default function ApiKeysPage() {
         </form>
       )}
 
-      {/* API Usage docs */}
-      <div className="rounded-xl border border-border bg-card p-5 mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-sm">How to use</h3>
-          <a href="/whatsapp" className="text-xs text-whatsapp hover:underline font-medium flex items-center gap-1">
-            Find Account ID →
-          </a>
-        </div>
-        <div className="space-y-3 font-mono text-xs bg-muted rounded-lg p-4">
-          <p className="text-muted-foreground"># Send a message via API</p>
-          <p>curl -X POST https://wa-autoreply-a416.onrender.com/api/v1/messages/send \</p>
-          <p className="pl-4">-H "Authorization: Bearer {newKey?.key || 'wha_live_xxx...'}" \</p>
-          <p className="pl-4">-H "Content-Type: application/json" \</p>
-          <p className="pl-4">-d {'\'{"account_id": "YOUR_ACCOUNT_ID", "phone": "919876543210", "message": "Hello!"}\''}</p>
-        </div>
-        <div className="mt-3 text-xs text-muted-foreground bg-muted/40 p-3 rounded-lg border border-border/50 flex items-center justify-between">
-          <span>💡 <strong>Need your Account ID?</strong> Go to <a href="/whatsapp" className="text-whatsapp font-medium hover:underline">WhatsApp Accounts</a> — each account card has a 1-click <strong>Copy ID</strong> button.</span>
-        </div>
-      </div>
+      {/* Integration Guide Section */}
+      <ApiDocsSection newKey={newKey} />
 
       {/* Keys list */}
       {loading ? (
