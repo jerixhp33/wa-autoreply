@@ -329,6 +329,7 @@ async def get_account(
 @router.get("/accounts/{account_id}/qr", response_model=QRResponse)
 async def get_qr(
     account_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -344,6 +345,13 @@ async def get_qr(
         account.status = AccountStatus.connected
         account.qr_code = None
         db.commit()
+    elif not is_conn and account.status != AccountStatus.connected:
+        # If no active session is running for this account, auto-start it so the QR code generates immediately
+        if account_id not in neonize_manager.sessions:
+            logger.info(f"Auto-starting session for account {account_id} on get_qr poll")
+            account.status = AccountStatus.connecting
+            db.commit()
+            background_tasks.add_task(start_whatsapp_session, account.id)
 
     return QRResponse(
         qr_code=account.qr_code if not is_conn else None,

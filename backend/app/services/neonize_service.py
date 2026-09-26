@@ -406,12 +406,14 @@ class WhatsAppSession:
         self.connected = False
         if self.client:
             try:
-                from neonize.client import stop_event
-                stop_event.set()
+                if hasattr(self.client, "disconnect"):
+                    self.client.disconnect()
+                elif hasattr(self.client, "stop"):
+                    self.client.stop()
             except Exception as e:
-                logger.warning(f"Could not set stop_event: {e}")
+                logger.warning(f"Could not disconnect client: {e}")
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=0.5)
 
 
 class NeonizeManager:
@@ -448,13 +450,13 @@ class NeonizeManager:
 
     async def start_session(self, account_id: str, session_name: str) -> WhatsAppSession:
         """Start a WhatsApp session for an account."""
-        # Stop existing session if any
+        # Stop existing session if any without blocking the event loop
         if account_id in self.sessions:
             existing = self.sessions[account_id]
             if existing.connected:
                 return existing
-            existing.stop()
-            del self.sessions[account_id]
+            await asyncio.get_event_loop().run_in_executor(None, existing.stop)
+            self.sessions.pop(account_id, None)
 
         callbacks = self._callbacks.get(account_id, {})
         loop = asyncio.get_running_loop()

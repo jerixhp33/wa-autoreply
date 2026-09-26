@@ -40,7 +40,7 @@ function QRModal({
     };
 
     loadQR();
-    const interval = setInterval(loadQR, 3000);
+    const interval = setInterval(loadQR, 1200);
     return () => clearInterval(interval);
   }, [account.id, onClose]);
 
