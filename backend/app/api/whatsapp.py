@@ -273,45 +273,60 @@ async def handle_message(
 _pending_starts: set = set()
 
 
-async def safe_start_whatsapp_session(account_id: str):
+async def safe_start_whatsapp_session(account_id: str, force_new_qr: bool = False):
     """Start WhatsApp session with in-flight deduplication to prevent duplicate tasks."""
     if account_id in _pending_starts:
         logger.info(f"Session start already in progress for account {account_id}, ignoring duplicate request")
         return
     _pending_starts.add(account_id)
     try:
-        await start_whatsapp_session(account_id)
+        await start_whatsapp_session(account_id, force_new_qr=force_new_qr)
     finally:
         _pending_starts.discard(account_id)
 
 
-async def start_whatsapp_session(account_id: str):
-    """Start a WhatsApp session in background, restoring persistent DB if missing."""
+async def start_whatsapp_session(account_id: str, force_new_qr: bool = False):
+    """Start a WhatsApp session in background, restoring persistent DB if missing or resetting for fresh QR."""
     session_path = get_session_path(account_id)
     session_db = session_path + ".db"
 
-    # Restore session database from PostgreSQL if not present on disk
-    has_disk_file = (
-        (os.path.exists(session_db) and os.path.getsize(session_db) > 0) or
-        (os.path.exists(session_path) and os.path.getsize(session_path) > 0)
-    )
-
-    if not has_disk_file:
-        from app.database.database import SessionLocal
-        db = SessionLocal()
-        try:
-            account = db.query(WhatsAppAccount).filter(WhatsAppAccount.id == account_id).first()
-            if account and account.session_data and len(account.session_data) > 0:
-                os.makedirs(os.path.dirname(session_db), exist_ok=True)
-                with open(session_db, "wb") as f:
-                    f.write(account.session_data)
-                with open(session_path, "wb") as f:
-                    f.write(account.session_data)
-                logger.info(f"Restored WhatsApp session database from PostgreSQL for account {account_id} ({len(account.session_data)} bytes)")
-        except Exception as rst_err:
-            logger.error(f"Failed to restore session DB: {rst_err}")
-        finally:
-            db.close()
+    phone_from_db = None
+    from app.database.database import SessionLocal
+    db = SessionLocal()
+    try:
+        account = db.query(WhatsAppAccount).filter(WhatsAppAccount.id == account_id).first()
+        if account:
+            if force_new_qr:
+                # User explicitly requested a fresh QR scan: clear stored credentials
+                logger.info(f"Clearing old session credentials for account {account_id} for fresh QR code")
+                account.session_data = None
+                account.phone_number = None
+                account.qr_code = None
+                account.status = AccountStatus.connecting
+                db.commit()
+                for fpath in [session_db, session_path, session_db + "-wal", session_db + "-shm", session_path + "-wal", session_path + "-shm"]:
+                    if os.path.exists(fpath):
+                        try:
+                            os.remove(fpath)
+                        except Exception:
+                            pass
+            else:
+                phone_from_db = account.phone_number
+                has_disk_file = (
+                    (os.path.exists(session_db) and os.path.getsize(session_db) > 0) or
+                    (os.path.exists(session_path) and os.path.getsize(session_path) > 0)
+                )
+                if not has_disk_file and account.session_data and len(account.session_data) > 0:
+                    os.makedirs(os.path.dirname(session_db), exist_ok=True)
+                    with open(session_db, "wb") as f:
+                        f.write(account.session_data)
+                    with open(session_path, "wb") as f:
+                        f.write(account.session_data)
+                    logger.info(f"Restored WhatsApp session database from PostgreSQL for account {account_id} ({len(account.session_data)} bytes)")
+    except Exception as rst_err:
+        logger.error(f"Failed in start_whatsapp_session DB setup: {rst_err}")
+    finally:
+        db.close()
 
     neonize_manager.register_callbacks(
         account_id=account_id,
@@ -323,7 +338,7 @@ async def start_whatsapp_session(account_id: str):
     )
 
     try:
-        await neonize_manager.start_session(account_id, session_path)
+        await neonize_manager.start_session(account_id, session_path, phone_number=phone_from_db)
     except Exception as e:
         logger.error(f"Failed to start session {account_id}: {e}")
         from app.database.database import SessionLocal
@@ -433,6 +448,7 @@ async def get_account(
 async def get_qr(
     account_id: str,
     background_tasks: BackgroundTasks,
+    force_new_qr: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -444,19 +460,23 @@ async def get_qr(
         raise HTTPException(status_code=404, detail="Account not found")
 
     is_conn = neonize_manager.is_connected(account.id)
-    if is_conn:
+    if is_conn and not force_new_qr:
         if account.status != AccountStatus.connected:
             account.status = AccountStatus.connected
             account.qr_code = None
             db.commit()
         return QRResponse(qr_code=None, status="connected")
 
-    # If no active session is running and none is starting, auto-start once safely
-    if account_id not in neonize_manager.sessions and account_id not in _pending_starts:
+    if force_new_qr:
+        logger.info(f"Force fresh QR requested for account {account_id}")
+        await neonize_manager.stop_session(account_id)
+        await asyncio.sleep(1.0)
+        background_tasks.add_task(safe_start_whatsapp_session, account.id, True)
+    elif account_id not in neonize_manager.sessions and account_id not in _pending_starts:
         logger.info(f"Auto-starting session for account {account_id} on get_qr poll")
         account.status = AccountStatus.connecting
         db.commit()
-        background_tasks.add_task(safe_start_whatsapp_session, account.id)
+        background_tasks.add_task(safe_start_whatsapp_session, account.id, False)
 
     return QRResponse(
         qr_code=account.qr_code if not is_conn else None,
@@ -468,6 +488,7 @@ async def get_qr(
 async def reconnect_account(
     account_id: str,
     background_tasks: BackgroundTasks,
+    force_new_qr: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -478,7 +499,7 @@ async def reconnect_account(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    if neonize_manager.is_connected(account_id):
+    if not force_new_qr and neonize_manager.is_connected(account_id):
         return WhatsAppAccountResponse.model_validate(account)
 
     await neonize_manager.stop_session(account_id)
@@ -486,10 +507,13 @@ async def reconnect_account(
 
     account.status = AccountStatus.connecting
     account.qr_code = None
+    if force_new_qr:
+        account.session_data = None
+        account.phone_number = None
     db.commit()
     db.refresh(account)
 
-    background_tasks.add_task(safe_start_whatsapp_session, account.id)
+    background_tasks.add_task(safe_start_whatsapp_session, account.id, force_new_qr)
     return WhatsAppAccountResponse.model_validate(account)
 
 

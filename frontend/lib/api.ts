@@ -56,14 +56,14 @@ export const whatsappApi = {
   getAccount: (id: string) =>
     api.get(`/api/whatsapp/accounts/${id}`),
 
-  getQR: (id: string) =>
-    api.get(`/api/whatsapp/accounts/${id}/qr`),
+  getQR: (id: string, force_new_qr: boolean = false) =>
+    api.get(`/api/whatsapp/accounts/${id}/qr${force_new_qr ? '?force_new_qr=true' : ''}`),
 
   disconnect: (id: string) =>
     api.post(`/api/whatsapp/accounts/${id}/disconnect`),
 
-  reconnect: (id: string) =>
-    api.post(`/api/whatsapp/accounts/${id}/reconnect`),
+  reconnect: (id: string, force_new_qr: boolean = false) =>
+    api.post(`/api/whatsapp/accounts/${id}/reconnect${force_new_qr ? '?force_new_qr=true' : ''}`),
 
   deleteAccount: (id: string) =>
     api.delete(`/api/whatsapp/accounts/${id}`),

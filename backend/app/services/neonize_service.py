@@ -22,6 +22,28 @@ from typing import Dict, Optional, Callable, Any
 logger = logging.getLogger(__name__)
 
 
+def _extract_phone_from_any(obj) -> Optional[str]:
+    """Robustly extract phone number from JID, Device, PairStatus or any object."""
+    if not obj:
+        return None
+    # 1. Direct User / user attribute (e.g. JID.User)
+    for attr in ("User", "user"):
+        val = getattr(obj, attr, None)
+        if val:
+            return str(val)
+
+    # 2. Nested JID (e.g. Device.JID, client.me.JID)
+    for parent_attr in ("JID", "jid", "ID", "id"):
+        parent = getattr(obj, parent_attr, None)
+        if parent:
+            for attr in ("User", "user"):
+                val = getattr(parent, attr, None)
+                if val:
+                    return str(val)
+
+    return None
+
+
 class WhatsAppSession:
     """Represents a single WhatsApp account session."""
 
@@ -35,6 +57,7 @@ class WhatsAppSession:
         on_message: Callable,
         loop: asyncio.AbstractEventLoop,
         on_logged_out: Optional[Callable] = None,
+        phone_number: Optional[str] = None,
     ):
         self.account_id = account_id
         self.session_name = session_name
@@ -46,7 +69,7 @@ class WhatsAppSession:
         self.loop = loop
         self.client = None
         self.connected = False
-        self.phone_number: Optional[str] = None
+        self.phone_number: Optional[str] = phone_number
         self._thread: Optional[threading.Thread] = None
         self._stopped = False
 
@@ -107,14 +130,11 @@ class WhatsAppSession:
             def on_pair_status_ev(c, event: PairStatusEv):
                 logger.info(f"PairStatusEv received for account {self.account_id}")
                 self.connected = True
-                phone = None
-                try:
-                    if hasattr(event, "ID") and hasattr(event.ID, "User") and event.ID.User:
-                        phone = str(event.ID.User)
-                    elif c.me and hasattr(c.me, "ID") and hasattr(c.me.ID, "User") and c.me.ID.User:
-                        phone = str(c.me.ID.User)
-                except Exception as p_err:
-                    logger.warning(f"Could not extract phone from PairStatus: {p_err}")
+                phone = (
+                    _extract_phone_from_any(event)
+                    or _extract_phone_from_any(getattr(c, "me", None))
+                    or self.phone_number
+                )
                 if phone:
                     self.phone_number = phone
                 logger.info(f"Account {self.account_id} paired successfully! Phone: {self.phone_number or phone}")
@@ -124,17 +144,26 @@ class WhatsAppSession:
             @client.event(ConnectedEv)
             def on_connected_ev(c, event: ConnectedEv):
                 logger.info(f"ConnectedEv received for account {self.account_id}")
-                phone = None
-                try:
-                    if c.me and hasattr(c.me, 'ID') and hasattr(c.me.ID, 'User') and c.me.ID.User:
-                        phone = str(c.me.ID.User)
-                except Exception:
-                    pass
-                if phone:
+                phone = _extract_phone_from_any(getattr(c, "me", None)) or self.phone_number
+
+                # Check if client is already paired/authenticated
+                is_logged_in = False
+                if getattr(c, "me", None) is not None:
+                    is_logged_in = True
+                elif getattr(c, "is_logged_in", None) and callable(c.is_logged_in):
+                    try:
+                        is_logged_in = c.is_logged_in()
+                    except Exception:
+                        pass
+                elif phone:
+                    is_logged_in = True
+
+                if is_logged_in:
                     self.connected = True
-                    self.phone_number = phone
-                    logger.info(f"Account {self.account_id} connected with phone: {phone}")
-                    _safe_schedule(self.on_connected(self.account_id, phone))
+                    if phone:
+                        self.phone_number = phone
+                    logger.info(f"Account {self.account_id} connected and logged in! Phone: {self.phone_number or phone}")
+                    _safe_schedule(self.on_connected(self.account_id, self.phone_number or phone))
                 else:
                     logger.info(f"Account {self.account_id} ConnectedEv before pairing (waiting for QR scan)")
 
@@ -475,6 +504,12 @@ class WhatsAppSession:
                     self.client.stop()
             except Exception as e:
                 logger.warning(f"Could not disconnect client: {e}")
+            try:
+                from neonize._binder import gocode
+                if hasattr(self.client, "uuid"):
+                    gocode.Stop(self.client.uuid)
+            except Exception as e:
+                logger.debug(f"gocode.Stop note: {e}")
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
 
@@ -514,7 +549,9 @@ class NeonizeManager:
             "on_logged_out": on_logged_out or on_disconnected,
         }
 
-    async def start_session(self, account_id: str, session_name: str) -> WhatsAppSession:
+    async def start_session(
+        self, account_id: str, session_name: str, phone_number: Optional[str] = None
+    ) -> WhatsAppSession:
         """Start a WhatsApp session for an account (serialized to protect Go C-FFI runtime)."""
         async with self._start_lock:
             # Stop existing session if any without blocking the event loop
@@ -539,6 +576,7 @@ class NeonizeManager:
                 on_message=callbacks.get("on_message", self._noop),
                 on_logged_out=callbacks.get("on_logged_out", self._noop),
                 loop=loop,
+                phone_number=phone_number,
             )
 
             self.sessions[account_id] = session
@@ -575,7 +613,15 @@ class NeonizeManager:
 
     def is_connected(self, account_id: str) -> bool:
         session = self.sessions.get(account_id)
-        return session is not None and session.connected
+        if not session:
+            return False
+        if session.connected:
+            return True
+        if session.client and getattr(session.client, "connected", False):
+            if getattr(session.client, "me", None) is not None or session.phone_number:
+                session.connected = True
+                return True
+        return False
 
     @staticmethod
     async def _noop(*args, **kwargs):

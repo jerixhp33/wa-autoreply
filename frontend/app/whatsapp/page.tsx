@@ -108,9 +108,28 @@ function QRModal({
               </div>
             </>
           ) : (
-            <div className="flex flex-col items-center gap-3 py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Generating QR code...</p>
+            <div className="flex flex-col items-center gap-3 py-10">
+              <Loader2 className="h-8 w-8 animate-spin text-whatsapp" />
+              <p className="text-sm font-medium text-foreground">Connecting to WhatsApp...</p>
+              <p className="text-xs text-muted-foreground text-center max-w-xs">
+                Resuming saved session or waiting for WhatsApp QR code.
+              </p>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    setQrData(null);
+                    await whatsappApi.reconnect(account.id, true);
+                    toast.info('Generating fresh QR code...');
+                  } catch {
+                    toast.error('Failed to request fresh QR');
+                  }
+                }}
+                className="mt-2 inline-flex items-center gap-1.5 text-xs text-whatsapp hover:underline font-medium"
+              >
+                <RefreshCw className="h-3 w-3" />
+                Reset & Scan Brand New QR
+              </button>
             </div>
           )}
         </div>
@@ -142,11 +161,11 @@ function AccountCard({
     }
   };
 
-  const handleReconnect = async () => {
+  const handleReconnect = async (forceNewQr: boolean = false) => {
     setLoading(true);
     try {
-      await whatsappApi.reconnect(account.id);
-      toast.success('Reconnecting...');
+      await whatsappApi.reconnect(account.id, forceNewQr);
+      toast.success(forceNewQr ? 'Generating fresh QR code...' : 'Reconnecting...');
       setShowQR(true);
       onRefresh();
     } catch {
@@ -240,13 +259,26 @@ function AccountCard({
           )}
 
           <button
-            onClick={handleReconnect}
+            onClick={() => handleReconnect(false)}
             disabled={loading}
             className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-50"
+            title="Reconnect using existing session"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             Reconnect
           </button>
+
+          {account.status !== 'connected' && (
+            <button
+              onClick={() => handleReconnect(true)}
+              disabled={loading}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-accent text-yellow-600 dark:text-yellow-400 transition-colors disabled:opacity-50"
+              title="Reset session and generate fresh QR code to scan"
+            >
+              <QrCode className="h-3.5 w-3.5" />
+              New QR
+            </button>
+          )}
 
           <button
             onClick={handleDelete}
