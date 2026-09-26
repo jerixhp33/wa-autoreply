@@ -63,10 +63,15 @@ function CreatedKeyBanner({ apiKey, onDismiss }: { apiKey: ApiKeyCreated; onDism
 }
 
 function ApiDocsSection({ newKey }: { newKey: ApiKeyCreated | null }) {
-  const [tab, setTab] = useState<'curl' | 'js' | 'python'>('curl');
+  const [tab, setTab] = useState<'curl' | 'js' | 'python' | 'env'>('curl');
   const [copied, setCopied] = useState(false);
 
   const bearerKey = newKey?.key || 'wha_live_xxx...';
+
+  const envCode = `# Add this to your project's .env.local file:
+WHATSAPP_API_URL=https://wa-autoreply-a416.onrender.com/api/v1/messages/send
+WHATSAPP_API_KEY=${bearerKey}
+WHATSAPP_ACCOUNT_ID=YOUR_ACCOUNT_ID`;
 
   const curlCode = `curl -X POST https://wa-autoreply-a416.onrender.com/api/v1/messages/send \\
   -H "Authorization: Bearer ${bearerKey}" \\
@@ -77,15 +82,15 @@ function ApiDocsSection({ newKey }: { newKey: ApiKeyCreated | null }) {
     "message": "Hello from API! 🚀"
   }'`;
 
-  const jsCode = `// Send message from Next.js / Node.js
-const response = await fetch("https://wa-autoreply-a416.onrender.com/api/v1/messages/send", {
+  const jsCode = `// Send message using process.env in Next.js / Node.js
+const response = await fetch(process.env.WHATSAPP_API_URL, {
   method: "POST",
   headers: {
-    "Authorization": "Bearer ${bearerKey}",
+    "Authorization": \`Bearer \${process.env.WHATSAPP_API_KEY}\`,
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    account_id: "YOUR_ACCOUNT_ID",
+    account_id: process.env.WHATSAPP_ACCOUNT_ID,
     phone: "YOUR_PHONE_NUMBER",
     message: "Hello from API! 🚀"
   })
@@ -94,15 +99,16 @@ const response = await fetch("https://wa-autoreply-a416.onrender.com/api/v1/mess
 const data = await response.json();
 console.log(data);`;
 
-  const pythonCode = `import requests
+  const pythonCode = `import os
+import requests
 
-url = "https://wa-autoreply-a416.onrender.com/api/v1/messages/send"
+url = os.getenv("WHATSAPP_API_URL", "https://wa-autoreply-a416.onrender.com/api/v1/messages/send")
 headers = {
-    "Authorization": "Bearer ${bearerKey}",
+    "Authorization": f"Bearer {os.getenv('WHATSAPP_API_KEY')}",
     "Content-Type": "application/json"
 }
 payload = {
-    "account_id": "YOUR_ACCOUNT_ID",
+    "account_id": os.getenv("WHATSAPP_ACCOUNT_ID"),
     "phone": "YOUR_PHONE_NUMBER",
     "message": "Hello from API! 🚀"
 }
@@ -110,7 +116,7 @@ payload = {
 response = requests.post(url, json=payload, headers=headers)
 print(response.json())`;
 
-  const currentCode = tab === 'curl' ? curlCode : tab === 'js' ? jsCode : pythonCode;
+  const currentCode = tab === 'env' ? envCode : tab === 'curl' ? curlCode : tab === 'js' ? jsCode : pythonCode;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(currentCode);
@@ -133,7 +139,14 @@ print(response.json())`;
 
       {/* Tabs */}
       <div className="flex items-center justify-between bg-muted/60 p-1 rounded-lg border border-border/50 mb-3">
-        <div className="flex gap-1">
+        <div className="flex gap-1 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setTab('env')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${tab === 'env' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            .env.local
+          </button>
           <button
             type="button"
             onClick={() => setTab('curl')}
