@@ -57,6 +57,7 @@ class WhatsAppSession:
                 Connected as ConnectedEv,
                 Disconnected as DisconnectedEv,
                 LoggedOut as LoggedOutEv,
+                PairStatus as PairStatusEv,
             )
 
             logger.info(f"Starting Neonize session: {self.session_name}")
@@ -99,18 +100,41 @@ class WhatsAppSession:
 
                 _safe_schedule(self.on_qr(self.account_id, qr_data_uri))
 
-            # ── Connected event ───────────────────────────────────────────
-            @client.event(ConnectedEv)
-            def on_connected_ev(c, event: ConnectedEv):
+            # ── PairStatus event (triggers when QR is scanned & authenticated) ──
+            @client.event(PairStatusEv)
+            def on_pair_status_ev(c, event: PairStatusEv):
+                logger.info(f"PairStatusEv received for account {self.account_id}")
                 self.connected = True
                 phone = None
                 try:
-                    if c.me:
-                        phone = str(c.me.ID.User) if hasattr(c.me, 'ID') else None
+                    if hasattr(event, "ID") and hasattr(event.ID, "User") and event.ID.User:
+                        phone = str(event.ID.User)
+                    elif c.me and hasattr(c.me, "ID") and hasattr(c.me.ID, "User") and c.me.ID.User:
+                        phone = str(c.me.ID.User)
+                except Exception as p_err:
+                    logger.warning(f"Could not extract phone from PairStatus: {p_err}")
+                if phone:
+                    self.phone_number = phone
+                logger.info(f"Account {self.account_id} paired successfully! Phone: {self.phone_number or phone}")
+                _safe_schedule(self.on_connected(self.account_id, self.phone_number or phone))
+
+            # ── Connected event (triggers on socket connection) ─────────────
+            @client.event(ConnectedEv)
+            def on_connected_ev(c, event: ConnectedEv):
+                logger.info(f"ConnectedEv received for account {self.account_id}")
+                phone = None
+                try:
+                    if c.me and hasattr(c.me, 'ID') and hasattr(c.me.ID, 'User') and c.me.ID.User:
+                        phone = str(c.me.ID.User)
                 except Exception:
                     pass
-                self.phone_number = phone
-                _safe_schedule(self.on_connected(self.account_id, phone))
+                if phone:
+                    self.connected = True
+                    self.phone_number = phone
+                    logger.info(f"Account {self.account_id} connected with phone: {phone}")
+                    _safe_schedule(self.on_connected(self.account_id, phone))
+                else:
+                    logger.info(f"Account {self.account_id} ConnectedEv before pairing (waiting for QR scan)")
 
             # ── Disconnected event ────────────────────────────────────────
             @client.event(DisconnectedEv)

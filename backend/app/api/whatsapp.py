@@ -69,14 +69,21 @@ async def handle_connected(account_id: str, phone_number: str):
 
             # Backup session SQLite database file to PostgreSQL
             session_path = get_session_path(account_id)
-            session_db = session_path + ".db"
-            if os.path.exists(session_db):
-                try:
-                    with open(session_db, "rb") as f:
-                        account.session_data = f.read()
-                    logger.info(f"Backed up WhatsApp session to PostgreSQL for account {account_id} ({len(account.session_data)} bytes)")
-                except Exception as bkp_err:
-                    logger.warning(f"Could not backup session DB: {bkp_err}")
+            candidates = [
+                session_path + ".db",
+                session_path,
+                session_path + ".sqlite3",
+                session_path + ".sqlite",
+            ]
+            for cand in candidates:
+                if os.path.exists(cand) and os.path.isfile(cand) and os.path.getsize(cand) > 0:
+                    try:
+                        with open(cand, "rb") as f:
+                            account.session_data = f.read()
+                        logger.info(f"Backed up WhatsApp session to PostgreSQL for account {account_id} from {cand} ({len(account.session_data)} bytes)")
+                        break
+                    except Exception as bkp_err:
+                        logger.warning(f"Could not backup session DB from {cand}: {bkp_err}")
 
             db.commit()
             await ws_manager.send_to_user(
@@ -192,7 +199,7 @@ async def start_whatsapp_session(account_id: str):
     session_db = session_path + ".db"
 
     # Restore session database from PostgreSQL if not present on disk
-    if not os.path.exists(session_db):
+    if not os.path.exists(session_db) and not os.path.exists(session_path):
         from app.database.database import SessionLocal
         db = SessionLocal()
         try:
@@ -200,6 +207,8 @@ async def start_whatsapp_session(account_id: str):
             if account and account.session_data:
                 os.makedirs(os.path.dirname(session_db), exist_ok=True)
                 with open(session_db, "wb") as f:
+                    f.write(account.session_data)
+                with open(session_path, "wb") as f:
                     f.write(account.session_data)
                 logger.info(f"Restored WhatsApp session database from PostgreSQL for account {account_id} ({len(account.session_data)} bytes)")
         except Exception as rst_err:
