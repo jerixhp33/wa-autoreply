@@ -22,6 +22,9 @@ export interface Contact {
   name: string | null;
   ai_enabled: boolean;
   blocked: boolean;
+  tags?: string | null;
+  sentiment?: string | null;
+  last_topic?: string | null;
   created_at: string;
 }
 
@@ -134,3 +137,17 @@ export type WSEventType =
   | 'ai_reply_completed'
   | 'ai_reply_error'
   | 'conversation_updated';
+
+export interface ScheduledMessage {
+  id: string;
+  whatsapp_account_id: string;
+  contact_id: string;
+  content: string;
+  message_type: 'text' | 'audio' | string;
+  media_path?: string | null;
+  scheduled_at: string;
+  sent_at?: string | null;
+  status: 'pending' | 'sent' | 'failed' | 'cancelled';
+  created_at: string;
+}
+

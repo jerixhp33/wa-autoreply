@@ -94,6 +94,9 @@ class ContactResponse(BaseModel):
     name: Optional[str] = None
     ai_enabled: bool
     blocked: bool
+    tags: Optional[str] = ""
+    sentiment: Optional[str] = "neutral"
+    last_topic: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -315,3 +318,35 @@ class DashboardStats(BaseModel):
     messages_today: int
     ai_replies_today: int
     active_conversations: int
+
+# ─── Scheduled Messages ────────────────────────────────────────────────────────
+
+class ScheduledMessageCreate(BaseModel):
+    content: str
+    scheduled_at: datetime
+    message_type: str = "text"
+
+    @field_validator('content')
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        trimmed = v.strip()
+        if not trimmed:
+            raise ValueError('Message content cannot be empty')
+        return trimmed
+
+
+class ScheduledMessageResponse(BaseModel):
+    id: str
+    whatsapp_account_id: str
+    contact_id: str
+    content: str
+    message_type: str
+    media_path: Optional[str] = None
+    scheduled_at: datetime
+    sent_at: Optional[datetime] = None
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+

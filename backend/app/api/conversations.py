@@ -8,11 +8,11 @@ from sqlalchemy.orm import Session, joinedload
 from app.database.database import get_db
 from app.models.models import (
     WhatsAppAccount, Conversation, Contact, Message, User,
-    MessageDirection, ContactMemory
+    MessageDirection, ContactMemory, ScheduledMessage
 )
 from app.schemas.schemas import (
     ConversationResponse, ConversationUpdate, MessageResponse, ContactResponse, ConversationListItem,
-    ContactMemoryResponse
+    ContactMemoryResponse, ScheduledMessageCreate, ScheduledMessageResponse
 )
 from sqlalchemy import func
 from app.services.auth_service import get_current_user
@@ -93,6 +93,9 @@ async def list_conversations(
                 "phone_number": conv.contact.phone_number,
                 "ai_enabled": conv.contact.ai_enabled,
                 "blocked": conv.contact.blocked,
+                "tags": conv.contact.tags or "",
+                "sentiment": conv.contact.sentiment or "neutral",
+                "last_topic": conv.contact.last_topic,
                 "created_at": conv.contact.created_at,
             } if conv.contact else None,
             "last_message": last_msg.content if last_msg else None,
@@ -139,6 +142,9 @@ async def get_conversation(
             "phone_number": conv.contact.phone_number,
             "ai_enabled": conv.contact.ai_enabled,
             "blocked": conv.contact.blocked,
+            "tags": conv.contact.tags or "",
+            "sentiment": conv.contact.sentiment or "neutral",
+            "last_topic": conv.contact.last_topic,
         } if conv.contact else None,
     }
 
@@ -289,3 +295,89 @@ async def clear_conversation_memories(
     db.commit()
 
     return {"message": f"Cleared {deleted_count} memories successfully"}
+
+
+@router.get("/{conversation_id}/scheduled", response_model=List[ScheduledMessageResponse])
+async def get_scheduled_messages(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    account = db.query(WhatsAppAccount).filter(
+        WhatsAppAccount.id == conv.whatsapp_account_id,
+        WhatsAppAccount.user_id == current_user.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    scheduled = (
+        db.query(ScheduledMessage)
+        .filter(
+            ScheduledMessage.whatsapp_account_id == conv.whatsapp_account_id,
+            ScheduledMessage.contact_id == conv.contact_id,
+            ScheduledMessage.status == "pending",
+        )
+        .order_by(ScheduledMessage.scheduled_at.asc())
+        .all()
+    )
+    return [ScheduledMessageResponse.model_validate(s) for s in scheduled]
+
+
+@router.post("/{conversation_id}/scheduled", response_model=ScheduledMessageResponse)
+async def create_scheduled_message(
+    conversation_id: str,
+    data: ScheduledMessageCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    account = db.query(WhatsAppAccount).filter(
+        WhatsAppAccount.id == conv.whatsapp_account_id,
+        WhatsAppAccount.user_id == current_user.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    sched = ScheduledMessage(
+        whatsapp_account_id=conv.whatsapp_account_id,
+        contact_id=conv.contact_id,
+        content=data.content,
+        message_type=data.message_type or "text",
+        scheduled_at=data.scheduled_at,
+        status="pending",
+    )
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+
+    return ScheduledMessageResponse.model_validate(sched)
+
+
+@router.delete("/scheduled/{scheduled_id}")
+async def cancel_scheduled_message(
+    scheduled_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    sched = db.query(ScheduledMessage).filter(ScheduledMessage.id == scheduled_id).first()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Scheduled message not found")
+
+    account = db.query(WhatsAppAccount).filter(
+        WhatsAppAccount.id == sched.whatsapp_account_id,
+        WhatsAppAccount.user_id == current_user.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    sched.status = "cancelled"
+    db.commit()
+
+    return {"message": "Scheduled message cancelled successfully"}

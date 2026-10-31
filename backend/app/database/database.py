@@ -32,6 +32,9 @@ def create_tables():
         ("messages", "media_caption", "TEXT"),
         ("messages", "transcription", "TEXT"),
         ("whatsapp_accounts", "session_data", "BYTEA"),
+        ("contacts", "tags", "VARCHAR DEFAULT ''"),
+        ("contacts", "sentiment", "VARCHAR DEFAULT 'neutral'"),
+        ("contacts", "last_topic", "VARCHAR"),
     ]
     with engine.connect() as conn:
         for table, col, col_type in columns:

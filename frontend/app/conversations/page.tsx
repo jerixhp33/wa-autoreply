@@ -5,10 +5,10 @@ import {
   Bot, User, Clock, CheckCheck, Send, Loader2,
   UserCheck, BotOff, Search, MessageSquare, Sparkles,
   Play, Pause, Mic, Smile, Image as ImageIcon,
-  Brain, Trash2, X, AlertCircle
+  Brain, Trash2, X, AlertCircle, Calendar, CalendarClock
 } from 'lucide-react';
 import { conversationsApi, messagesApi, whatsappApi, API_BASE } from '@/lib/api';
-import { Conversation, Message, WhatsAppAccount, ContactMemory } from '@/types';
+import { Conversation, Message, WhatsAppAccount, ContactMemory, ScheduledMessage } from '@/types';
 import { formatRelativeTime, formatTime, getInitials, cn, truncate } from '@/lib/utils';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { toast } from 'sonner';
@@ -223,6 +223,9 @@ function ConversationItem({
   selected: boolean;
   onClick: () => void;
 }) {
+  const tags = (conv.contact?.tags || '').split(',').map(t => t.trim()).filter(Boolean);
+  const sentiment = conv.contact?.sentiment;
+
   return (
     <button
       onClick={onClick}
@@ -231,8 +234,14 @@ function ConversationItem({
         selected ? 'bg-accent' : ''
       )}
     >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">
+      <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">
         {getInitials(conv.contact?.name || conv.contact?.phone_number)}
+        {sentiment === 'positive' && (
+          <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-500 border-2 border-card flex items-center justify-center text-[8px] text-white" title="Positive sentiment">✓</span>
+        )}
+        {sentiment === 'negative' && (
+          <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-rose-500 border-2 border-card flex items-center justify-center text-[8px] text-white" title="Negative sentiment">!</span>
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between">
@@ -255,6 +264,15 @@ function ConversationItem({
             ) : null}
           </div>
         </div>
+        {tags.length > 0 && (
+          <div className="flex items-center gap-1 mt-1 overflow-hidden">
+            {tags.slice(0, 3).map((tag, i) => (
+              <span key={i} className="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.2 rounded bg-muted text-muted-foreground">
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </button>
   );
@@ -274,6 +292,11 @@ export default function ConversationsPage() {
   const [memories, setMemories] = useState<ContactMemory[]>([]);
   const [showMemoriesModal, setShowMemoriesModal] = useState(false);
   const [clearingMemories, setClearingMemories] = useState(false);
+  const [scheduledMsgs, setScheduledMsgs] = useState<ScheduledMessage[]>([]);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduleText, setScheduleText] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('');
+  const [scheduling, setScheduling] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { on } = useWebSocket();
 
@@ -309,6 +332,15 @@ export default function ConversationsPage() {
     }
   }, []);
 
+  const loadScheduled = useCallback(async (convId: string) => {
+    try {
+      const res = await conversationsApi.getScheduled(convId);
+      setScheduledMsgs(res.data);
+    } catch (err) {
+      console.error('Failed to load scheduled messages', err);
+    }
+  }, []);
+
   useEffect(() => {
     loadConversations();
     whatsappApi.listAccounts().then(res => setAccounts(res.data)).catch(console.error);
@@ -318,11 +350,14 @@ export default function ConversationsPage() {
     if (selectedConv) {
       loadMessages(selectedConv.id);
       loadMemories(selectedConv.id);
+      loadScheduled(selectedConv.id);
     } else {
       setMemories([]);
+      setScheduledMsgs([]);
       setShowMemoriesModal(false);
+      setShowScheduleModal(false);
     }
-  }, [selectedConv, loadMessages, loadMemories]);
+  }, [selectedConv, loadMessages, loadMemories, loadScheduled]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -474,10 +509,53 @@ export default function ConversationsPage() {
     }
   };
 
+  const handleScheduleMessage = async () => {
+    if (!selectedConv || !scheduleText.trim() || !scheduleTime) {
+      toast.error('Please enter a message and select date/time');
+      return;
+    }
+    setScheduling(true);
+    try {
+      const scheduledIso = new Date(scheduleTime).toISOString();
+      await conversationsApi.scheduleMessage(selectedConv.id, {
+        content: scheduleText.trim(),
+        scheduled_at: scheduledIso,
+      });
+      toast.success('Follow-up message scheduled successfully!');
+      setScheduleText('');
+      setScheduleTime('');
+      loadScheduled(selectedConv.id);
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to schedule message');
+    } finally {
+      setScheduling(false);
+    }
+  };
+
+  const handleCancelScheduled = async (schedId: string) => {
+    try {
+      await conversationsApi.cancelScheduled(schedId);
+      setScheduledMsgs(prev => prev.filter(s => s.id !== schedId));
+      toast.success('Scheduled message cancelled');
+    } catch {
+      toast.error('Failed to cancel scheduled message');
+    }
+  };
+
+  const setPresetTime = (hoursFromNow: number) => {
+    const d = new Date(Date.now() + hoursFromNow * 3600 * 1000);
+    // Format for datetime-local input: YYYY-MM-DDTHH:MM
+    const iso = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    setScheduleTime(iso);
+  };
+
   const filteredConvs = conversations.filter(c => {
     const name = c.contact?.name || c.contact?.phone_number || '';
-    return name.toLowerCase().includes(search.toLowerCase());
+    const tags = c.contact?.tags || '';
+    return name.toLowerCase().includes(search.toLowerCase()) || tags.toLowerCase().includes(search.toLowerCase());
   });
+
+  const selectedTags = (selectedConv?.contact?.tags || '').split(',').map(t => t.trim()).filter(Boolean);
 
   return (
     <div className="flex h-screen">
@@ -489,7 +567,7 @@ export default function ConversationsPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search..."
+              placeholder="Search contacts or #tags..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full rounded-lg border border-input bg-background pl-8 pr-3 py-2 text-sm outline-none focus:border-primary"
@@ -532,20 +610,67 @@ export default function ConversationsPage() {
         <div className="flex flex-1 flex-col min-w-0">
           {/* Header */}
           <div className="flex items-center gap-3 border-b border-border px-6 py-4 bg-card">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-sm font-semibold">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-sm font-semibold shrink-0">
               {getInitials(selectedConv.contact?.name || selectedConv.contact?.phone_number)}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold truncate">
-                {selectedConv.contact?.name || selectedConv.contact?.phone_number}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {selectedConv.contact?.phone_number}
-              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="font-semibold truncate">
+                  {selectedConv.contact?.name || selectedConv.contact?.phone_number}
+                </p>
+                {selectedConv.contact?.sentiment && selectedConv.contact.sentiment !== 'neutral' && (
+                  <span className={cn(
+                    "text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize",
+                    selectedConv.contact.sentiment === 'positive' ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-rose-500/15 text-rose-500"
+                  )}>
+                    {selectedConv.contact.sentiment}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground truncate mt-0.5">
+                <span>{selectedConv.contact?.phone_number}</span>
+                {selectedConv.contact?.last_topic && (
+                  <>
+                    <span>•</span>
+                    <span className="truncate italic">Topic: {selectedConv.contact.last_topic}</span>
+                  </>
+                )}
+              </div>
+              {selectedTags.length > 0 && (
+                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                  {selectedTags.map((tag, i) => (
+                    <span key={i} className={cn(
+                      "text-[9px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider",
+                      tag === 'lead' ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20" :
+                      tag === 'customer' ? "bg-blue-500/15 text-blue-500 border border-blue-500/20" :
+                      tag === 'support' ? "bg-rose-500/15 text-rose-500 border border-rose-500/20" :
+                      tag === 'vip' ? "bg-purple-500/15 text-purple-500 border border-purple-500/20" :
+                      tag === 'tamil' ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" :
+                      "bg-muted text-muted-foreground"
+                    )}>
+                      #{tag}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Action buttons: AI Memory + Human Takeover */}
-            <div className="flex items-center gap-2">
+            {/* Action buttons: Follow-Up + AI Memory + Human Takeover */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setShowScheduleModal(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-accent transition-colors"
+                title="Schedule an autonomous follow-up message"
+              >
+                <CalendarClock className="h-3.5 w-3.5 text-blue-500" />
+                <span className="hidden sm:inline">Follow-Up</span>
+                {scheduledMsgs.length > 0 && (
+                  <span className="rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 py-0.2 text-[10px] font-semibold">
+                    {scheduledMsgs.length}
+                  </span>
+                )}
+              </button>
+
               <button
                 onClick={() => setShowMemoriesModal(true)}
                 className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-accent transition-colors"
@@ -616,7 +741,7 @@ export default function ConversationsPage() {
               <div className="mb-2.5 flex items-center justify-between rounded-lg bg-blue-500/10 border border-blue-500/20 px-3 py-2 text-xs text-blue-500">
                 <div className="flex items-center gap-1.5">
                   <UserCheck className="h-3.5 w-3.5 shrink-0" />
-                  <span>Human takeover active — AI replies paused for this contact</span>
+                  <span>Human takeover active — AI auto-reply is paused for this contact</span>
                 </div>
                 <button
                   onClick={toggleTakeover}
@@ -731,6 +856,134 @@ export default function ConversationsPage() {
                   Done
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Autonomous Scheduled Follow-Ups Modal */}
+      {showScheduleModal && selectedConv && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-4 border-b border-border">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10 text-blue-500">
+                  <CalendarClock className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-base">Schedule Follow-Up</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Auto-send follow-up to {selectedConv.contact?.name || selectedConv.contact?.phone_number}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowScheduleModal(false)}
+                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4 max-h-[60vh] overflow-y-auto">
+              {/* Message content */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Follow-up Message</label>
+                <textarea
+                  value={scheduleText}
+                  onChange={e => setScheduleText(e.target.value)}
+                  placeholder="e.g. Hi! Just checking in to see if you had any questions about our pricing or products..."
+                  rows={3}
+                  className="w-full resize-none rounded-xl border border-input bg-background p-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              {/* Quick Presets */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Quick Schedule Presets</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    onClick={() => setPresetTime(1)}
+                    className="p-2 text-xs rounded-lg border border-border bg-muted/40 hover:bg-muted font-medium transition-colors"
+                  >
+                    In 1 Hour
+                  </button>
+                  <button
+                    onClick={() => setPresetTime(3)}
+                    className="p-2 text-xs rounded-lg border border-border bg-muted/40 hover:bg-muted font-medium transition-colors"
+                  >
+                    In 3 Hours
+                  </button>
+                  <button
+                    onClick={() => setPresetTime(24)}
+                    className="p-2 text-xs rounded-lg border border-border bg-muted/40 hover:bg-muted font-medium transition-colors"
+                  >
+                    Tomorrow
+                  </button>
+                  <button
+                    onClick={() => setPresetTime(48)}
+                    className="p-2 text-xs rounded-lg border border-border bg-muted/40 hover:bg-muted font-medium transition-colors"
+                  >
+                    In 2 Days
+                  </button>
+                </div>
+              </div>
+
+              {/* Exact Date & Time Picker */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Custom Date & Time</label>
+                <input
+                  type="datetime-local"
+                  value={scheduleTime}
+                  onChange={e => setScheduleTime(e.target.value)}
+                  className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <button
+                onClick={handleScheduleMessage}
+                disabled={scheduling || !scheduleText.trim() || !scheduleTime}
+                className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {scheduling ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarClock className="h-4 w-4" />}
+                Schedule Follow-Up
+              </button>
+
+              {/* Pending Scheduled Queue */}
+              {scheduledMsgs.length > 0 && (
+                <div className="pt-3 border-t border-border">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Pending Follow-Ups for this Contact</p>
+                  <div className="space-y-2">
+                    {scheduledMsgs.map((s) => (
+                      <div key={s.id} className="p-3 rounded-xl border border-border bg-muted/30 flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs text-foreground break-words line-clamp-2">{s.content}</p>
+                          <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+                            <Clock className="h-3 w-3 text-blue-500" />
+                            Scheduled for: {new Date(s.scheduled_at).toLocaleString()}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleCancelScheduled(s.id)}
+                          className="p-1 text-muted-foreground hover:text-red-500 rounded transition-colors"
+                          title="Cancel scheduled message"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-border flex justify-end">
+              <button
+                onClick={() => setShowScheduleModal(false)}
+                className="px-4 py-1.5 text-xs font-medium bg-muted text-muted-foreground hover:text-foreground rounded-lg transition-colors"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

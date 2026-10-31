@@ -82,6 +82,9 @@ class Contact(Base):
     name = Column(String, nullable=True)
     ai_enabled = Column(Boolean, default=True)
     blocked = Column(Boolean, default=False)
+    tags = Column(String, default="")  # Comma-separated: e.g. "lead,tamil,vip"
+    sentiment = Column(String, default="neutral")  # "positive", "neutral", "negative"
+    last_topic = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     whatsapp_account = relationship("WhatsAppAccount", back_populates="contacts")
@@ -202,3 +205,22 @@ class ContactMemory(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     contact = relationship("Contact", backref="memories")
+
+class ScheduledMessage(Base):
+    """Stores queued or scheduled messages for automated follow-ups."""
+    __tablename__ = "scheduled_messages"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    whatsapp_account_id = Column(String, ForeignKey("whatsapp_accounts.id"), nullable=False)
+    contact_id = Column(String, ForeignKey("contacts.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    message_type = Column(String, default="text")  # 'text', 'audio'
+    media_path = Column(String, nullable=True)
+    scheduled_at = Column(DateTime(timezone=True), nullable=False)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String, default="pending")  # 'pending', 'sent', 'failed', 'cancelled'
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    contact = relationship("Contact", backref="scheduled_messages")
+    whatsapp_account = relationship("WhatsAppAccount")
+

@@ -23,7 +23,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import settings
 from app.database.database import SessionLocal, create_tables
-from app.models.models import WhatsAppAccount, AccountStatus
+from datetime import datetime, timezone
+from app.models.models import (
+    WhatsAppAccount, AccountStatus, Contact, Conversation, ScheduledMessage,
+    MessageDirection, MessageStatus
+)
 from app.services.neonize_service import neonize_manager
 from app.services.message_service import process_incoming_message
 
@@ -366,6 +370,73 @@ async def health_heartbeat():
             logger.error(f"Health heartbeat error: {e}")
 
 
+async def scheduled_message_runner():
+    """
+    Autonomous runner that checks for pending scheduled messages every 20 seconds
+    and dispatches them via WhatsApp when their scheduled_at time arrives.
+    """
+    while True:
+        await asyncio.sleep(20)
+        try:
+            db = SessionLocal()
+            try:
+                now_utc = datetime.now(timezone.utc)
+                pending_msgs = (
+                    db.query(ScheduledMessage)
+                    .filter(
+                        ScheduledMessage.status == "pending",
+                        ScheduledMessage.scheduled_at <= now_utc,
+                    )
+                    .all()
+                )
+
+                for sched in pending_msgs:
+                    if neonize_manager.is_connected(sched.whatsapp_account_id):
+                        contact = db.query(Contact).filter(Contact.id == sched.contact_id).first()
+                        if contact and not contact.blocked:
+                            try:
+                                phone = contact.phone_number
+                                if sched.message_type == "audio" and sched.media_path:
+                                    await neonize_manager.send_audio(sched.whatsapp_account_id, phone, sched.media_path)
+                                else:
+                                    await neonize_manager.send_message(sched.whatsapp_account_id, phone, sched.content)
+
+                                sched.status = "sent"
+                                sched.sent_at = datetime.now(timezone.utc)
+
+                                # Record into Message history
+                                conv = db.query(Conversation).filter(
+                                    Conversation.whatsapp_account_id == sched.whatsapp_account_id,
+                                    Conversation.contact_id == sched.contact_id,
+                                ).first()
+                                if conv:
+                                    from app.services.message_service import save_message
+                                    save_message(
+                                        db=db,
+                                        conversation_id=conv.id,
+                                        content=sched.content,
+                                        direction=MessageDirection.outgoing,
+                                        ai_generated=True,
+                                        status=MessageStatus.sent,
+                                        message_type=sched.message_type,
+                                        media_path=sched.media_path,
+                                    )
+                                logger.info(f"✅ Dispatched scheduled message {sched.id} to {phone}")
+                            except Exception as send_err:
+                                sched.status = "failed"
+                                logger.error(f"Failed to send scheduled message {sched.id}: {send_err}")
+                        else:
+                            sched.status = "cancelled"
+                    else:
+                        logger.debug(f"Account {sched.whatsapp_account_id} not connected, deferring scheduled message {sched.id}")
+
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            logger.debug(f"Scheduled runner loop note: {e}")
+
+
 async def main():
     """Main worker loop."""
     logger.info("🚀 WhatsApp Worker starting...")
@@ -375,8 +446,9 @@ async def main():
 
     await load_and_start_sessions()
 
-    # Start health heartbeat in background
+    # Start health heartbeat and autonomous scheduled message runner in background
     asyncio.create_task(health_heartbeat())
+    asyncio.create_task(scheduled_message_runner())
 
     logger.info("✅ Worker ready — monitoring sessions with reconnection engine...")
 

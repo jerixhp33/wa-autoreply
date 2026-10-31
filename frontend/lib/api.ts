@@ -88,6 +88,15 @@ export const conversationsApi = {
 
   clearMemories: (id: string) =>
     api.delete(`/api/conversations/${id}/memories`),
+
+  getScheduled: (id: string) =>
+    api.get(`/api/conversations/${id}/scheduled`),
+
+  scheduleMessage: (id: string, data: { content: string; scheduled_at: string; message_type?: string }) =>
+    api.post(`/api/conversations/${id}/scheduled`, data),
+
+  cancelScheduled: (scheduledId: string) =>
+    api.delete(`/api/conversations/scheduled/${scheduledId}`),
 };
 
 // ─── Messages ─────────────────────────────────────────────────────────────────
