@@ -73,6 +73,20 @@ class QRResponse(BaseModel):
 
 # ─── Contacts ─────────────────────────────────────────────────────────────────
 
+class ContactMemoryResponse(BaseModel):
+    id: str
+    contact_id: str
+    memory_type: str
+    key: str
+    value: str
+    confidence: str = "high"
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class ContactResponse(BaseModel):
     id: str
     whatsapp_account_id: str

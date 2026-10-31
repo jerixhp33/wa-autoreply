@@ -187,3 +187,18 @@ class Document(Base):
 
     whatsapp_account = relationship("WhatsAppAccount", back_populates="documents")
 
+
+class ContactMemory(Base):
+    """Stores extracted facts/preferences about contacts for personalized AI replies."""
+    __tablename__ = "contact_memories"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    contact_id = Column(String, ForeignKey("contacts.id"), nullable=False)
+    memory_type = Column(String, nullable=False)  # 'preference', 'fact', 'topic', 'sentiment'
+    key = Column(String, nullable=False)           # e.g. 'name', 'language', 'interest'
+    value = Column(Text, nullable=False)
+    confidence = Column(String, default="high")    # 'high', 'medium', 'low'
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    contact = relationship("Contact", backref="memories")

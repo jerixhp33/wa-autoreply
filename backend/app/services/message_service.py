@@ -4,6 +4,7 @@ Message Service
 Handles the full message flow:
 WhatsApp → Save → AI Processing → Reply
 """
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict
@@ -267,7 +268,11 @@ async def process_incoming_message(
         # Retrieve active knowledge base documents context for this account
         from app.services.document_service import get_active_knowledge_context
         from app.services.tts_service import generate_voice_note
+        from app.services.memory_service import get_memory_context, extract_and_store_memories
         knowledge_context = get_active_knowledge_context(db, account_id)
+
+        # Retrieve personalized memory context for this contact
+        memory_context = get_memory_context(contact.id, db)
 
         # Check if user requested a sticker from an image
         stickers_enabled = getattr(bot_settings, "stickers_enabled", True)
@@ -339,6 +344,8 @@ async def process_incoming_message(
                 media_type == "audio" or getattr(bot_settings, "voice_reply_mode", "audio_only") == "always"
             )
             effective_system_prompt = bot_settings.system_prompt
+            if memory_context:
+                effective_system_prompt += f"\n\n{memory_context}"
             if voice_active:
                 effective_system_prompt += (
                     "\n\n## 🎙️ VOICE NOTE SPEECH GUIDELINES\n"
@@ -494,6 +501,16 @@ async def process_incoming_message(
                 },
                 account.user_id
             )
+
+        # Asynchronously extract new memories from this interaction (fire-and-forget)
+        try:
+            asyncio.create_task(extract_and_store_memories(
+                contact_id=contact.id,
+                user_message=content or caption or "",
+                ai_reply=display_text,
+            ))
+        except Exception as mem_err:
+            logger.debug(f"Memory extraction task schedule note: {mem_err}")
 
         return {
             "reply": display_text,

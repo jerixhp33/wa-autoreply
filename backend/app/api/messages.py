@@ -38,6 +38,11 @@ async def send_message(
     contact = get_or_create_contact(db, data.account_id, phone)
     conv = get_or_create_conversation(db, data.account_id, contact.id)
 
+    # Automatically activate human takeover when a message is manually sent by agent
+    if not conv.human_takeover:
+        conv.human_takeover = True
+        db.commit()
+
     # Send via WhatsApp
     try:
         await neonize_manager.send_message(data.account_id, phone, data.message)
@@ -69,9 +74,21 @@ async def send_message(
         }
     )
 
+    # Notify client of human takeover state change
+    await ws_manager.send_to_user(
+        current_user.id,
+        "conversation_updated",
+        {
+            "id": conv.id,
+            "human_takeover": conv.human_takeover,
+            "ai_enabled": conv.ai_enabled,
+        }
+    )
+
     return {
         "id": saved.id,
         "conversation_id": conv.id,
         "status": "sent",
-        "message": data.message
+        "message": data.message,
+        "human_takeover": conv.human_takeover,
     }

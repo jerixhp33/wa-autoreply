@@ -4,10 +4,11 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Bot, User, Clock, CheckCheck, Send, Loader2,
   UserCheck, BotOff, Search, MessageSquare, Sparkles,
-  Play, Pause, Mic, Smile, Image as ImageIcon
+  Play, Pause, Mic, Smile, Image as ImageIcon,
+  Brain, Trash2, X, AlertCircle
 } from 'lucide-react';
 import { conversationsApi, messagesApi, whatsappApi, API_BASE } from '@/lib/api';
-import { Conversation, Message, WhatsAppAccount } from '@/types';
+import { Conversation, Message, WhatsAppAccount, ContactMemory } from '@/types';
 import { formatRelativeTime, formatTime, getInitials, cn, truncate } from '@/lib/utils';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { toast } from 'sonner';
@@ -248,9 +249,9 @@ function ConversationItem({
           </p>
           <div className="flex items-center gap-1 ml-2 shrink-0">
             {conv.human_takeover ? (
-              <span className="rounded-full bg-blue-500/10 text-blue-500 px-1.5 py-0.5 text-[10px] font-medium">Human</span>
+              <span className="rounded-full bg-blue-500/10 text-blue-500 border border-blue-500/20 px-1.5 py-0.5 text-[10px] font-medium">Human</span>
             ) : conv.ai_enabled ? (
-              <span className="rounded-full bg-whatsapp/10 text-whatsapp px-1.5 py-0.5 text-[10px] font-medium">AI</span>
+              <span className="rounded-full bg-whatsapp/10 text-whatsapp border border-whatsapp/20 px-1.5 py-0.5 text-[10px] font-medium">AI</span>
             ) : null}
           </div>
         </div>
@@ -270,6 +271,9 @@ export default function ConversationsPage() {
   const [messageInput, setMessageInput] = useState('');
   const [search, setSearch] = useState('');
   const [aiTyping, setAiTyping] = useState(false);
+  const [memories, setMemories] = useState<ContactMemory[]>([]);
+  const [showMemoriesModal, setShowMemoriesModal] = useState(false);
+  const [clearingMemories, setClearingMemories] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { on } = useWebSocket();
 
@@ -296,6 +300,15 @@ export default function ConversationsPage() {
     }
   }, []);
 
+  const loadMemories = useCallback(async (convId: string) => {
+    try {
+      const res = await conversationsApi.getMemories(convId);
+      setMemories(res.data);
+    } catch (err) {
+      console.error('Failed to load memories', err);
+    }
+  }, []);
+
   useEffect(() => {
     loadConversations();
     whatsappApi.listAccounts().then(res => setAccounts(res.data)).catch(console.error);
@@ -304,8 +317,12 @@ export default function ConversationsPage() {
   useEffect(() => {
     if (selectedConv) {
       loadMessages(selectedConv.id);
+      loadMemories(selectedConv.id);
+    } else {
+      setMemories([]);
+      setShowMemoriesModal(false);
     }
-  }, [selectedConv, loadMessages]);
+  }, [selectedConv, loadMessages, loadMemories]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -313,7 +330,6 @@ export default function ConversationsPage() {
 
   // WebSocket events
   useEffect(() => {
-    // Helper: add a message only if its id isn't already in the list
     const addMessageIfNew = (newMsg: Message) => {
       setMessages(prev => {
         if (prev.some(m => m.id === newMsg.id)) return prev;
@@ -366,6 +382,7 @@ export default function ConversationsPage() {
           whatsapp_message_id: null,
           created_at: data.created_at,
         });
+        loadMemories(selectedConv.id);
       }
       loadConversations();
     });
@@ -391,8 +408,19 @@ export default function ConversationsPage() {
       loadConversations();
     });
 
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
-  }, [on, selectedConv, loadConversations]);
+    const unsub5 = on('conversation_updated', (data: any) => {
+      if (selectedConv && data.id === selectedConv.id) {
+        setSelectedConv(prev => prev ? {
+          ...prev,
+          human_takeover: data.human_takeover !== undefined ? data.human_takeover : prev.human_takeover,
+          ai_enabled: data.ai_enabled !== undefined ? data.ai_enabled : prev.ai_enabled,
+        } : null);
+      }
+      loadConversations();
+    });
+
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
+  }, [on, selectedConv, loadConversations, loadMemories]);
 
   const handleSend = async () => {
     if (!messageInput.trim() || !selectedConv) return;
@@ -404,7 +432,14 @@ export default function ConversationsPage() {
       if (!account) throw new Error('Account not found');
       const phone = selectedConv.contact?.phone_number;
       if (!phone) throw new Error('No phone number');
-      await messagesApi.send(account.id, phone, content);
+      const res = await messagesApi.send(account.id, phone, content);
+
+      // Automatically reflect human takeover in state
+      if (res?.data?.human_takeover !== undefined) {
+        setSelectedConv(prev => prev ? { ...prev, human_takeover: res.data.human_takeover } : null);
+      } else {
+        setSelectedConv(prev => prev ? { ...prev, human_takeover: true } : null);
+      }
     } catch (err: any) {
       toast.error(err.response?.data?.detail || 'Failed to send message');
       setMessageInput(content);
@@ -419,9 +454,23 @@ export default function ConversationsPage() {
     try {
       await conversationsApi.update(selectedConv.id, { human_takeover: newVal });
       setSelectedConv(prev => prev ? { ...prev, human_takeover: newVal } : null);
-      toast.success(newVal ? 'Human takeover enabled' : 'Returned to AI');
+      toast.success(newVal ? 'Human takeover active — AI paused' : 'AI active — Bot will auto-reply');
     } catch {
       toast.error('Failed to update conversation');
+    }
+  };
+
+  const handleClearMemories = async () => {
+    if (!selectedConv) return;
+    setClearingMemories(true);
+    try {
+      await conversationsApi.clearMemories(selectedConv.id);
+      setMemories([]);
+      toast.success('AI memories cleared for this contact');
+    } catch {
+      toast.error('Failed to clear memories');
+    } finally {
+      setClearingMemories(false);
     }
   };
 
@@ -494,21 +543,39 @@ export default function ConversationsPage() {
                 {selectedConv.contact?.phone_number}
               </p>
             </div>
-            <button
-              onClick={toggleTakeover}
-              className={cn(
-                'flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors',
-                selectedConv.human_takeover
-                  ? 'bg-blue-500/10 text-blue-500 hover:bg-blue-500/20'
-                  : 'bg-whatsapp/10 text-whatsapp hover:bg-whatsapp/20'
-              )}
-            >
-              {selectedConv.human_takeover ? (
-                <><UserCheck className="h-3.5 w-3.5" /> Human Active</>
-              ) : (
-                <><Bot className="h-3.5 w-3.5" /> AI Active</>
-              )}
-            </button>
+
+            {/* Action buttons: AI Memory + Human Takeover */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowMemoriesModal(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-accent transition-colors"
+                title="View what AI has learned about this contact"
+              >
+                <Brain className="h-3.5 w-3.5 text-purple-500" />
+                <span className="hidden sm:inline">AI Memory</span>
+                {memories.length > 0 && (
+                  <span className="rounded-full bg-purple-500/20 text-purple-600 dark:text-purple-400 px-1.5 py-0.2 text-[10px] font-semibold">
+                    {memories.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={toggleTakeover}
+                className={cn(
+                  'flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-colors border',
+                  selectedConv.human_takeover
+                    ? 'bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 border-blue-500/30'
+                    : 'bg-whatsapp/10 text-whatsapp hover:bg-whatsapp/20 border-whatsapp/30'
+                )}
+              >
+                {selectedConv.human_takeover ? (
+                  <><UserCheck className="h-3.5 w-3.5" /> Human Active</>
+                ) : (
+                  <><Bot className="h-3.5 w-3.5" /> AI Active</>
+                )}
+              </button>
+            </div>
           </div>
 
           {/* Messages */}
@@ -545,6 +612,21 @@ export default function ConversationsPage() {
 
           {/* Input */}
           <div className="border-t border-border p-4 bg-card">
+            {selectedConv.human_takeover && (
+              <div className="mb-2.5 flex items-center justify-between rounded-lg bg-blue-500/10 border border-blue-500/20 px-3 py-2 text-xs text-blue-500">
+                <div className="flex items-center gap-1.5">
+                  <UserCheck className="h-3.5 w-3.5 shrink-0" />
+                  <span>Human takeover active — AI replies paused for this contact</span>
+                </div>
+                <button
+                  onClick={toggleTakeover}
+                  className="font-semibold underline hover:no-underline ml-2"
+                >
+                  Return to AI
+                </button>
+              </div>
+            )}
+
             <div className="flex items-end gap-3">
               <textarea
                 value={messageInput}
@@ -555,23 +637,101 @@ export default function ConversationsPage() {
                     handleSend();
                   }
                 }}
-                placeholder="Type a message..."
+                placeholder="Type a message (sends directly to customer)..."
                 rows={1}
                 className="flex-1 resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary max-h-32"
               />
               <button
                 onClick={handleSend}
                 disabled={sending || !messageInput.trim()}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-whatsapp text-white hover:bg-whatsapp-dark transition-colors disabled:opacity-50"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-whatsapp text-white hover:bg-whatsapp-dark transition-colors disabled:opacity-50 shadow-sm"
               >
                 {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </button>
             </div>
-            {selectedConv.human_takeover && (
-              <p className="text-xs text-blue-500 mt-2 flex items-center gap-1">
-                <UserCheck className="h-3 w-3" /> Human takeover active — AI replies paused
-              </p>
-            )}
+          </div>
+        </div>
+      )}
+
+      {/* AI Memories Modal */}
+      {showMemoriesModal && selectedConv && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-4 border-b border-border">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/10 text-purple-500">
+                  <Brain className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-base">Contact Memory</h3>
+                  <p className="text-xs text-muted-foreground">
+                    What AI has learned about {selectedConv.contact?.name || selectedConv.contact?.phone_number}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowMemoriesModal(false)}
+                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="py-4 max-h-[60vh] overflow-y-auto space-y-2.5">
+              {memories.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Brain className="h-10 w-10 mx-auto mb-2.5 text-muted-foreground/30" />
+                  <p className="text-sm font-medium">No memories stored yet</p>
+                  <p className="text-xs text-muted-foreground mt-1 max-w-xs mx-auto">
+                    As this customer chats with your bot, key preferences, topics, and details will be automatically learned and shown here.
+                  </p>
+                </div>
+              ) : (
+                memories.map((m) => (
+                  <div key={m.id} className="p-3 rounded-xl border border-border/70 bg-muted/40 hover:bg-muted/70 transition-colors flex items-start justify-between gap-3">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold capitalize text-foreground">{m.key}</span>
+                        <span className={cn(
+                          "text-[10px] font-medium px-2 py-0.5 rounded-full uppercase tracking-wider",
+                          m.memory_type === 'preference' ? "bg-blue-500/15 text-blue-500" :
+                          m.memory_type === 'sentiment' ? "bg-amber-500/15 text-amber-500" :
+                          m.memory_type === 'topic' ? "bg-emerald-500/15 text-emerald-500" :
+                          "bg-purple-500/15 text-purple-500"
+                        )}>
+                          {m.memory_type}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground break-words">{m.value}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-border flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {memories.length} fact{memories.length === 1 ? '' : 's'} remembered
+              </span>
+              <div className="flex items-center gap-2">
+                {memories.length > 0 && (
+                  <button
+                    onClick={handleClearMemories}
+                    disabled={clearingMemories}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {clearingMemories ? 'Clearing...' : 'Clear All'}
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowMemoriesModal(false)}
+                  className="px-4 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

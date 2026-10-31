@@ -8,10 +8,11 @@ from sqlalchemy.orm import Session, joinedload
 from app.database.database import get_db
 from app.models.models import (
     WhatsAppAccount, Conversation, Contact, Message, User,
-    MessageDirection
+    MessageDirection, ContactMemory
 )
 from app.schemas.schemas import (
-    ConversationResponse, ConversationUpdate, MessageResponse, ContactResponse, ConversationListItem
+    ConversationResponse, ConversationUpdate, MessageResponse, ContactResponse, ConversationListItem,
+    ContactMemoryResponse
 )
 from sqlalchemy import func
 from app.services.auth_service import get_current_user
@@ -237,3 +238,54 @@ async def get_message_media(
         media_type=mime,
         filename=os.path.basename(msg.media_path),
     )
+
+
+@router.get("/{conversation_id}/memories", response_model=List[ContactMemoryResponse])
+async def get_conversation_memories(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    account = db.query(WhatsAppAccount).filter(
+        WhatsAppAccount.id == conv.whatsapp_account_id,
+        WhatsAppAccount.user_id == current_user.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    memories = (
+        db.query(ContactMemory)
+        .filter(ContactMemory.contact_id == conv.contact_id)
+        .order_by(ContactMemory.updated_at.desc().nullslast(), ContactMemory.created_at.desc())
+        .all()
+    )
+    return [ContactMemoryResponse.model_validate(m) for m in memories]
+
+
+@router.delete("/{conversation_id}/memories")
+async def clear_conversation_memories(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    account = db.query(WhatsAppAccount).filter(
+        WhatsAppAccount.id == conv.whatsapp_account_id,
+        WhatsAppAccount.user_id == current_user.id
+    ).first()
+    if not account:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    deleted_count = db.query(ContactMemory).filter(
+        ContactMemory.contact_id == conv.contact_id
+    ).delete()
+    db.commit()
+
+    return {"message": f"Cleared {deleted_count} memories successfully"}

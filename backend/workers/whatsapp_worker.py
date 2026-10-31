@@ -7,6 +7,7 @@ This is a persistent background process that:
 - Registers callbacks for QR, connect, disconnect, and messages
 - Processes incoming messages and generates AI replies
 - Runs indefinitely, restarted by Docker
+- Robust reconnection engine with exponential backoff & circuit breaker
 
 Run with: python -m workers.whatsapp_worker
 """
@@ -14,6 +15,8 @@ import asyncio
 import logging
 import os
 import sys
+import time
+from typing import Dict
 
 # Add backend root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,6 +32,36 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
 logger = logging.getLogger("whatsapp_worker")
+
+
+# ── Reconnection Engine ──────────────────────────────────────────────────────
+# Exponential backoff delays: 10s → 30s → 1m → 2m → 5m → 10m (max)
+RECONNECT_DELAYS = [10, 30, 60, 120, 300, 600]
+MAX_RECONNECT_ATTEMPTS = 10
+
+# Per-account reconnect tracking: {account_id: {"attempts": int, "last_attempt": float}}
+_reconnect_state: Dict[str, dict] = {}
+# Accounts that should NOT be auto-reconnected (manually disconnected/deleted)
+_reconnect_cancelled: set = set()
+
+
+def _get_reconnect_delay(attempts: int) -> int:
+    """Get backoff delay for the given attempt number."""
+    idx = min(attempts, len(RECONNECT_DELAYS) - 1)
+    return RECONNECT_DELAYS[idx]
+
+
+def _reset_reconnect(account_id: str):
+    """Reset reconnect counter for an account (called on successful connection)."""
+    _reconnect_state.pop(account_id, None)
+    _reconnect_cancelled.discard(account_id)
+    logger.info(f"🔄 Reconnect state reset for {account_id}")
+
+
+def _cancel_reconnect(account_id: str):
+    """Cancel any pending reconnect for an account."""
+    _reconnect_cancelled.add(account_id)
+    _reconnect_state.pop(account_id, None)
 
 
 def get_session_name(account_id: str) -> str:
@@ -62,7 +95,10 @@ async def on_qr(account_id: str, qr_data: str):
 
 
 async def on_connected(account_id: str, phone_number: str):
-    """Handle successful connection."""
+    """Handle successful connection — reset reconnect counter."""
+    # Reset reconnect state on successful connection
+    _reset_reconnect(account_id)
+
     db = SessionLocal()
     try:
         account = db.query(WhatsAppAccount).filter(
@@ -74,7 +110,7 @@ async def on_connected(account_id: str, phone_number: str):
             if phone_number:
                 account.phone_number = phone_number
             db.commit()
-            logger.info(f"Account {account_id} connected! Phone: {phone_number}")
+            logger.info(f"✅ Account {account_id} connected! Phone: {phone_number}")
     except Exception as e:
         logger.error(f"Connected handler error: {e}")
     finally:
@@ -82,7 +118,13 @@ async def on_connected(account_id: str, phone_number: str):
 
 
 async def on_disconnected(account_id: str):
-    """Handle disconnection — attempt reconnect after delay."""
+    """Handle disconnection with exponential backoff reconnection engine."""
+    # Check if reconnect was cancelled (manual disconnect/delete)
+    if account_id in _reconnect_cancelled:
+        logger.info(f"Reconnect cancelled for {account_id}, not retrying")
+        return
+
+    # Update DB status
     db = SessionLocal()
     try:
         account = db.query(WhatsAppAccount).filter(
@@ -91,16 +133,61 @@ async def on_disconnected(account_id: str):
         if account:
             account.status = AccountStatus.disconnected
             db.commit()
-            logger.warning(f"Account {account_id} disconnected")
+            logger.warning(f"⚠️ Account {account_id} disconnected")
     except Exception as e:
         logger.error(f"Disconnect handler error: {e}")
     finally:
         db.close()
 
-    # Schedule reconnect after 30s
-    await asyncio.sleep(30)
-    logger.info(f"Attempting reconnect for account {account_id}...")
-    await start_account_session(account_id)
+    # Get or init reconnect state for this account
+    state = _reconnect_state.get(account_id, {"attempts": 0, "last_attempt": 0})
+    attempts = state["attempts"]
+
+    # Circuit breaker: max attempts reached → mark as error, stop retrying
+    if attempts >= MAX_RECONNECT_ATTEMPTS:
+        logger.error(
+            f"🔴 CIRCUIT BREAKER: Account {account_id} failed {attempts} consecutive "
+            f"reconnects. Marking as ERROR. Manual intervention required."
+        )
+        db = SessionLocal()
+        try:
+            account = db.query(WhatsAppAccount).filter(
+                WhatsAppAccount.id == account_id
+            ).first()
+            if account:
+                account.status = AccountStatus.error
+                db.commit()
+        except Exception as e:
+            logger.error(f"Circuit breaker DB update error: {e}")
+        finally:
+            db.close()
+        _reconnect_state.pop(account_id, None)
+        return
+
+    # Calculate backoff delay
+    delay = _get_reconnect_delay(attempts)
+    attempts += 1
+    _reconnect_state[account_id] = {"attempts": attempts, "last_attempt": time.time()}
+
+    logger.info(
+        f"🔄 Reconnect attempt {attempts}/{MAX_RECONNECT_ATTEMPTS} for {account_id} "
+        f"in {delay}s (backoff)"
+    )
+
+    # Wait with backoff
+    await asyncio.sleep(delay)
+
+    # Double-check cancellation after sleep
+    if account_id in _reconnect_cancelled:
+        logger.info(f"Reconnect cancelled for {account_id} during backoff wait")
+        return
+
+    # Attempt reconnect
+    logger.info(f"🔄 Attempting reconnect for {account_id} (attempt {attempts})...")
+    try:
+        await start_account_session(account_id)
+    except Exception as e:
+        logger.error(f"Reconnect attempt {attempts} failed for {account_id}: {e}")
 
 
 async def on_message(
@@ -217,23 +304,85 @@ async def load_and_start_sessions():
         db.close()
 
 
+async def health_heartbeat():
+    """
+    Periodic health check every 60s:
+    - Log active/total sessions
+    - Detect zombie sessions (thread dead but marked connected)
+    - Auto-trigger reconnect for zombies
+    """
+    while True:
+        await asyncio.sleep(60)
+        try:
+            active = 0
+            total = len(neonize_manager.sessions)
+            zombies = []
+
+            for acct_id, session in list(neonize_manager.sessions.items()):
+                if session.connected:
+                    # Verify thread is actually alive
+                    if session._thread and session._thread.is_alive():
+                        active += 1
+                    else:
+                        # Zombie: marked connected but thread is dead
+                        zombies.append(acct_id)
+                        session.connected = False
+                        logger.warning(
+                            f"🧟 Zombie session detected: {acct_id} "
+                            f"(marked connected but thread dead)"
+                        )
+
+            # Log reconnect state summary
+            pending_reconnects = len(_reconnect_state)
+            logger.info(
+                f"💓 Heartbeat: {active}/{total} sessions connected"
+                + (f", {pending_reconnects} pending reconnects" if pending_reconnects else "")
+                + (f", {len(zombies)} zombies detected" if zombies else "")
+            )
+
+            # Trigger reconnect for zombies
+            for acct_id in zombies:
+                if acct_id not in _reconnect_cancelled:
+                    logger.info(f"🔄 Auto-reconnecting zombie session {acct_id}")
+                    asyncio.create_task(on_disconnected(acct_id))
+
+            # Sync DB status for truly connected sessions
+            if active > 0:
+                db = SessionLocal()
+                try:
+                    for acct_id, session in neonize_manager.sessions.items():
+                        if session.connected and session._thread and session._thread.is_alive():
+                            account = db.query(WhatsAppAccount).filter(
+                                WhatsAppAccount.id == acct_id
+                            ).first()
+                            if account and account.status != AccountStatus.connected:
+                                account.status = AccountStatus.connected
+                                db.commit()
+                                logger.info(f"Synced DB status to connected for {acct_id}")
+                finally:
+                    db.close()
+
+        except Exception as e:
+            logger.error(f"Health heartbeat error: {e}")
+
+
 async def main():
     """Main worker loop."""
-    logger.info("WhatsApp Worker starting...")
+    logger.info("🚀 WhatsApp Worker starting...")
 
     create_tables()
     logger.info("Database ready")
 
     await load_and_start_sessions()
-    logger.info("Worker ready — monitoring sessions...")
+
+    # Start health heartbeat in background
+    asyncio.create_task(health_heartbeat())
+
+    logger.info("✅ Worker ready — monitoring sessions with reconnection engine...")
 
     # Keep alive loop
     while True:
         await asyncio.sleep(60)
-        # Log active sessions count
-        active = sum(1 for s in neonize_manager.sessions.values() if s.connected)
-        total = len(neonize_manager.sessions)
-        logger.info(f"Sessions: {active}/{total} connected")
 
 
 if __name__ == "__main__":

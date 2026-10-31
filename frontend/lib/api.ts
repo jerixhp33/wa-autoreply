@@ -82,6 +82,12 @@ export const conversationsApi = {
 
   update: (id: string, data: { ai_enabled?: boolean; human_takeover?: boolean }) =>
     api.patch(`/api/conversations/${id}`, data),
+
+  getMemories: (id: string) =>
+    api.get(`/api/conversations/${id}/memories`),
+
+  clearMemories: (id: string) =>
+    api.delete(`/api/conversations/${id}/memories`),
 };
 
 // ─── Messages ─────────────────────────────────────────────────────────────────

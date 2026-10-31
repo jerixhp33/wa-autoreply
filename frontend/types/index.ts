@@ -25,6 +25,17 @@ export interface Contact {
   created_at: string;
 }
 
+export interface ContactMemory {
+  id: string;
+  contact_id: string;
+  memory_type: 'preference' | 'fact' | 'topic' | 'sentiment' | string;
+  key: string;
+  value: string;
+  confidence: string;
+  created_at: string;
+  updated_at?: string | null;
+}
+
 export interface Conversation {
   id: string;
   whatsapp_account_id: string;
@@ -121,4 +132,5 @@ export type WSEventType =
   | 'message_sent'
   | 'ai_reply_started'
   | 'ai_reply_completed'
-  | 'ai_reply_error';
+  | 'ai_reply_error'
+  | 'conversation_updated';
